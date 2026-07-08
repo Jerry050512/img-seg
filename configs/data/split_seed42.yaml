@@ -1,0 +1,9 @@
+seed: 42
+strategy: case_level
+ratios:
+  train: 0.7
+  val: 0.15
+  test: 0.15
+notes:
+  - Keep all slices from the same NIfTI case in the same split.
+  - Convert masks with mask > 0 for binary segmentation unless a multi-class task is confirmed.

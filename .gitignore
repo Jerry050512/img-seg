@@ -1,0 +1,35 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# uv / packaging
+*.egg-info/
+build/
+dist/
+
+# Generated artifacts
+checkpoints/
+outputs/
+runs/
+wandb/
+mlruns/
+*.log
+
+# Local data: keep large data out of Git, share via agreed external storage.
+dataset/**/*.nii
+dataset/**/*.nii.gz
+dataset/processed/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local Codex metadata
+.agents/
