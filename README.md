@@ -1,4 +1,4 @@
-﻿# AI Image Segmentation Course Project
+# AI Image Segmentation Course Project
 
 本项目用于人工智能综合课程实践：基于 NIfTI 扫描样本及其 segmentation mask，训练并对比 3 个分割模型，最终提供可选择模型的批量推理 WebUI。
 
@@ -45,6 +45,7 @@ uv sync
 
 - 数据集盘点：[docs/DATASET_AUDIT.md](docs/DATASET_AUDIT.md)
 - 项目结构：[docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)
+- nnU-Net v2 工作流：[docs/NNUNET_V2_WORKFLOW.md](docs/NNUNET_V2_WORKFLOW.md)
 - 模型调研与推荐：[docs/MODEL_RESEARCH.md](docs/MODEL_RESEARCH.md)
 - 三人协作规范：[docs/COLLABORATION.md](docs/COLLABORATION.md)
 - 智能体开发规则：[AGENTS.md](AGENTS.md)
