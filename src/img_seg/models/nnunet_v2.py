@@ -41,6 +41,8 @@ class NnUNetPaths:
             env["nnUNet_npp"] = str(runtime["nnunet_npp"])
         if "nnunet_nps" in runtime:
             env["nnUNet_nps"] = str(runtime["nnunet_nps"])
+        if "nnunet_ext_trainer" in runtime:
+            env["nnUNet_extTrainer"] = str(resolve_project_path(runtime["nnunet_ext_trainer"]))
         return env
 
 
