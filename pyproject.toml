@@ -32,6 +32,7 @@ dev = [
 
 [project.scripts]
 imgseg-audit-nifti = "img_seg.data.audit_cli:main"
+imgseg-nnunet = "img_seg.training.nnunet_v2_cli:main"
 imgseg-webui = "img_seg.webui.app:main"
 
 [build-system]
