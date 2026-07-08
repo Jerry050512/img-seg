@@ -74,6 +74,9 @@ def test_prepare_nnunet_dataset_and_evaluate(tmp_path: Path) -> None:
     assert len(list((dataset_dir_out / "labelsTr").glob("*.nii.gz"))) == 2
     assert len(list((dataset_dir_out / "imagesTs").glob("*_0000.nii.gz"))) == 1
     assert len(list((dataset_dir_out / "labelsTs").glob("*.nii.gz"))) == 1
+    splits_final = tmp_path / "nnunet_preprocessed" / dataset_folder_name(777, "Tiny")
+    splits = json.loads((splits_final / "splits_final.json").read_text(encoding="utf-8"))
+    assert splits == [{"train": prepared.split.train, "val": prepared.split.val}]
 
     label_path = next((dataset_dir_out / "labelsTr").glob("*.nii.gz"))
     labels = np.asanyarray(nib.load(str(label_path)).dataobj)

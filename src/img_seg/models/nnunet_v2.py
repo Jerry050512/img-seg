@@ -105,6 +105,14 @@ def _write_split_json(dataset_dir: Path, split: CaseSplit) -> None:
         f.write("\n")
 
 
+def _write_nnunet_splits(preprocessed_dataset_dir: Path, split: CaseSplit) -> None:
+    preprocessed_dataset_dir.mkdir(parents=True, exist_ok=True)
+    payload = [{"train": split.train, "val": split.val}]
+    with (preprocessed_dataset_dir / "splits_final.json").open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+
 def prepare_nnunet_dataset(config_path: str | Path) -> PreparedDataset:
     """Convert local cases into the nnU-Net v2 raw dataset layout."""
 
@@ -154,6 +162,10 @@ def prepare_nnunet_dataset(config_path: str | Path) -> PreparedDataset:
 
     _write_dataset_json(dataset_dir, config=config, num_training=len(split.train_val))
     _write_split_json(dataset_dir, split)
+    _write_nnunet_splits(
+        paths.preprocessed / dataset_folder_name(dataset_id, dataset_name),
+        split,
+    )
     return PreparedDataset(
         dataset_dir=dataset_dir,
         dataset_name=dataset_folder_name(dataset_id, dataset_name),

@@ -44,3 +44,13 @@ def test_make_case_split_is_case_level_and_reproducible() -> None:
     assert set(split_a.train).isdisjoint(split_a.val)
     assert set(split_a.train).isdisjoint(split_a.test)
     assert set(split_a.val).isdisjoint(split_a.test)
+
+
+def test_discover_cases_ignores_processed_dir(tmp_path: Path) -> None:
+    touch(tmp_path / "case_a" / "image.nii")
+    touch(tmp_path / "case_a" / "image_Seg.nii")
+    (tmp_path / "processed" / "nnunet_raw").mkdir(parents=True)
+
+    cases = discover_cases(tmp_path)
+
+    assert [case.case_id for case in cases] == ["case_a"]

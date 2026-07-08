@@ -14,6 +14,19 @@ uv sync
 & "C:\Users\Jerry\AppData\Local\Microsoft\WinGet\Links\uv.exe" sync
 ```
 
+## CUDA 环境
+
+`pyproject.toml` 已固定 Windows/Linux 使用 PyTorch CUDA 12.1 wheel：
+
+- `torch==2.5.1+cu121`
+- `torchvision==0.20.1+cu121`
+
+同步后可用以下命令确认 GPU 可见：
+
+```powershell
+uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+```
+
 ## 2. 转换数据
 
 ```powershell
@@ -27,6 +40,7 @@ uv run imgseg-nnunet --config configs/nnunet_v2/base.yaml prepare
 - 将训练/验证 case 写入 `dataset/processed/nnunet_raw/Dataset501_ImgSeg/imagesTr` 与 `labelsTr`。
 - 将测试 case 写入 `imagesTs`，测试标签另存到 `labelsTs` 供项目评估使用。
 - 将所有 mask 统一转换为二值 `0/1`，并输出 `.nii.gz`。
+- 在 `dataset/processed/nnunet_preprocessed/Dataset501_ImgSeg/splits_final.json` 写入 nnU-Net 可识别的 fold 0 train/val 划分。
 
 ## 3. 规划和预处理
 
@@ -100,6 +114,7 @@ uv run imgseg-nnunet predict --configuration 2d --folds 0 --dry-run
 2026-07-08 在 RTX 4060 8GB 机器上已完成以下 smoke/集成验证：
 
 - `uv sync` 成功创建 `.venv` 并安装依赖。
+- `torch 2.5.1+cu121` 可用，`torch.cuda.is_available()` 为 True，GPU 为 NVIDIA GeForce RTX 4060 Laptop GPU。
 - `uv run pytest` 通过，当前 6 个测试全绿。
 - `uv run ruff check .` 通过。
 - `uv run imgseg-nnunet prepare` 已将真实 `dataset/` 转为 `Dataset501_ImgSeg`，划分为 train=6、val=1、test=1。

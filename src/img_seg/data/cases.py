@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 NIFTI_SUFFIXES = (".nii", ".nii.gz")
+DEFAULT_IGNORED_DIRS = frozenset({"processed", "splits"})
 
 
 @dataclass(frozen=True)
@@ -48,14 +49,21 @@ def discover_cases(
     dataset_dir: str | Path,
     *,
     mask_overrides: dict[str, str] | None = None,
+    ignored_dirs: set[str] | frozenset[str] | None = None,
     require_masks: bool = True,
 ) -> list[SegmentationCase]:
     """Discover one image and one optional mask per immediate dataset child directory."""
 
     dataset_dir = Path(dataset_dir)
     mask_overrides = mask_overrides or {}
+    ignored_dirs = DEFAULT_IGNORED_DIRS if ignored_dirs is None else ignored_dirs
     cases: list[SegmentationCase] = []
-    for case_dir in sorted(path for path in dataset_dir.iterdir() if path.is_dir()):
+    case_dirs = (
+        path
+        for path in dataset_dir.iterdir()
+        if path.is_dir() and not path.name.startswith(".") and path.name not in ignored_dirs
+    )
+    for case_dir in sorted(case_dirs):
         case_id = case_id_from_dir(case_dir)
         images, masks = find_case_files(case_dir)
         image_path = choose_single_file(images, "image", case_id)
