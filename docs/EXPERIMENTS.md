@@ -4,4 +4,4 @@
 
 | date | owner | model | split | input | loss | epochs | best Dice | IoU | precision | recall | infer sec/case | checkpoint | notes |
 |---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|
-| 2026-07-08 | Codex | nnU-Net v2 2d fold0 | `split_seed42` | nnU-Net 2D patches | Dice+CE | 3 complete, running | 0.7528 | TBD | TBD | TBD | TBD | `checkpoints/nnunet_v2/Dataset501_ImgSeg/nnUNetTrainer__nnUNetPlans__2d/fold_0` | Training in progress; current report in `outputs/reports/nnunet_v2_2d_fold0`. |
+| 2026-07-08 | Codex | nnU-Net v2 2d fold0 | `split_seed42` | nnU-Net 2D patches | Dice+CE | 4 complete, running | 0.7734 | TBD | TBD | TBD | TBD | `checkpoints/nnunet_v2/Dataset501_ImgSeg/nnUNetTrainer__nnUNetPlans__2d/fold_0` | Training in progress; current report in `outputs/reports/nnunet_v2_2d_fold0`. |
