@@ -31,4 +31,5 @@ def test_nnunet_command_wrappers_support_dry_run(tmp_path: Path) -> None:
 
     plan_and_preprocess(config_path, dry_run=True)
     train(config_path, configuration="2d", fold=0, dry_run=True)
+    train(config_path, configuration="2d", fold=0, continue_training=True, dry_run=True)
     predict(config_path, configuration="2d", folds="0", dry_run=True)

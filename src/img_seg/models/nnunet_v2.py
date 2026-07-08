@@ -27,11 +27,16 @@ class NnUNetPaths:
     preprocessed: Path
     results: Path
 
-    def env(self) -> dict[str, str]:
+    def env(self, runtime: dict[str, Any] | None = None) -> dict[str, str]:
         env = os.environ.copy()
         env["nnUNet_raw"] = str(self.raw)
         env["nnUNet_preprocessed"] = str(self.preprocessed)
         env["nnUNet_results"] = str(self.results)
+        runtime = runtime or {}
+        if "nnunet_n_proc_da" in runtime:
+            env["nnUNet_n_proc_DA"] = str(runtime["nnunet_n_proc_da"])
+        if "nnunet_def_n_proc" in runtime:
+            env["nnUNet_def_n_proc"] = str(runtime["nnunet_def_n_proc"])
         return env
 
 
@@ -184,7 +189,7 @@ def plan_and_preprocess(
     command = ["nnUNetv2_plan_and_preprocess", "-d", dataset_id]
     if verify:
         command.append("--verify_dataset_integrity")
-    run_command(command, env=paths.env(), dry_run=dry_run)
+    run_command(command, env=paths.env(deep_get(config, "runtime", {})), dry_run=dry_run)
 
 
 def train(
@@ -192,6 +197,7 @@ def train(
     *,
     configuration: str,
     fold: str | int,
+    continue_training: bool = False,
     dry_run: bool = False,
 ) -> None:
     config = load_nnunet_config(config_path)
@@ -199,7 +205,9 @@ def train(
     trainer = str(deep_get(config, "training.trainer", "nnUNetTrainer"))
     paths = nnunet_paths_from_config(config)
     command = ["nnUNetv2_train", dataset_id, configuration, str(fold), "-tr", trainer]
-    run_command(command, env=paths.env(), dry_run=dry_run)
+    if continue_training:
+        command.append("--c")
+    run_command(command, env=paths.env(deep_get(config, "runtime", {})), dry_run=dry_run)
 
 
 def predict(
@@ -231,7 +239,7 @@ def predict(
         "-f",
         folds,
     ]
-    run_command(command, env=paths.env(), dry_run=dry_run)
+    run_command(command, env=paths.env(deep_get(config, "runtime", {})), dry_run=dry_run)
 
 
 def evaluate_predictions(prediction_dir: str | Path, reference_dir: str | Path) -> dict[str, Any]:

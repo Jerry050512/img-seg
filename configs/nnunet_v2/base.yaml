@@ -1,4 +1,4 @@
-﻿model_key: nnunet_v2
+model_key: nnunet_v2
 model_name: nnU-Net v2
 dataset:
   id: 501
@@ -27,6 +27,9 @@ training:
     - 2d
     - 3d_lowres
   fold: 0
+runtime:
+  nnunet_n_proc_da: 1
+  nnunet_def_n_proc: 2
 inference:
   output_dir: outputs/nnunet_v2
 notes:
