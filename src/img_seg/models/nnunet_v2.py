@@ -37,6 +37,10 @@ class NnUNetPaths:
             env["nnUNet_n_proc_DA"] = str(runtime["nnunet_n_proc_da"])
         if "nnunet_def_n_proc" in runtime:
             env["nnUNet_def_n_proc"] = str(runtime["nnunet_def_n_proc"])
+        if "nnunet_npp" in runtime:
+            env["nnUNet_npp"] = str(runtime["nnunet_npp"])
+        if "nnunet_nps" in runtime:
+            env["nnUNet_nps"] = str(runtime["nnunet_nps"])
         return env
 
 
@@ -217,6 +221,7 @@ def predict(
     output_dir: str | Path | None = None,
     configuration: str,
     folds: str = "0",
+    checkpoint_name: str | None = None,
     dry_run: bool = False,
 ) -> None:
     config = load_nnunet_config(config_path)
@@ -239,6 +244,8 @@ def predict(
         "-f",
         folds,
     ]
+    if checkpoint_name:
+        command.extend(["-chk", checkpoint_name])
     run_command(command, env=paths.env(deep_get(config, "runtime", {})), dry_run=dry_run)
 
 

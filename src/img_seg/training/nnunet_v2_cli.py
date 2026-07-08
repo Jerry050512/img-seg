@@ -41,6 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     predict_parser.add_argument("--output-dir")
     predict_parser.add_argument("--configuration", default="2d")
     predict_parser.add_argument("--folds", default="0")
+    predict_parser.add_argument("--checkpoint-name")
     predict_parser.add_argument("--dry-run", action="store_true")
 
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate predictions against labels.")
@@ -80,6 +81,7 @@ def main() -> None:
             output_dir=args.output_dir,
             configuration=args.configuration,
             folds=args.folds,
+            checkpoint_name=args.checkpoint_name,
             dry_run=args.dry_run,
         )
     elif args.command == "evaluate":

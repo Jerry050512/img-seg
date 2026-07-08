@@ -30,6 +30,8 @@ training:
 runtime:
   nnunet_n_proc_da: 1
   nnunet_def_n_proc: 2
+  nnunet_npp: 1
+  nnunet_nps: 1
 inference:
   output_dir: outputs/nnunet_v2
 notes:
