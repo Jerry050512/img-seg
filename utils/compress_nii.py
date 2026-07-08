@@ -36,7 +36,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("path", type=Path, help="A .nii file or a directory.")
     parser.add_argument("--recursive", action="store_true", help="Scan subdirectories.")
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing .nii.gz files.")
+    parser.add_argument(
+        "--overwrite", action="store_true", help="Overwrite existing .nii.gz files."
+    )
     parser.add_argument(
         "--remove-source",
         action="store_true",

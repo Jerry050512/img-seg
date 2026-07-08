@@ -19,8 +19,8 @@ dependencies = [
     "scipy>=1.14.0",
     "segmentation-models-pytorch>=0.4.0",
     "timm>=1.0.0",
-    "torch>=2.5.0",
-    "torchvision>=0.20.0",
+    "torch==2.5.1+cu121; sys_platform == 'win32' or sys_platform == 'linux'",
+    "torchvision==0.20.1+cu121; sys_platform == 'win32' or sys_platform == 'linux'",
     "tqdm>=4.66.0",
 ]
 
@@ -32,6 +32,7 @@ dev = [
 
 [project.scripts]
 imgseg-audit-nifti = "img_seg.data.audit_cli:main"
+imgseg-nnunet = "img_seg.training.nnunet_v2_cli:main"
 imgseg-webui = "img_seg.webui.app:main"
 
 [build-system]
@@ -40,6 +41,19 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 package = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu121", marker = "sys_platform == 'win32' or sys_platform == 'linux'" },
+]
+torchvision = [
+    { index = "pytorch-cu121", marker = "sys_platform == 'win32' or sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
 
 [tool.ruff]
 line-length = 100

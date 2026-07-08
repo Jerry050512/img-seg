@@ -15,7 +15,6 @@ import struct
 from pathlib import Path
 from typing import BinaryIO
 
-
 DTYPES = {
     2: ("uint8", 1),
     4: ("int16", 2),
@@ -114,7 +113,9 @@ def iter_nifti(root: Path) -> list[Path]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("path", type=Path)
-    parser.add_argument("--labels", action="store_true", help="Compute labels for files containing 'seg'.")
+    parser.add_argument(
+        "--labels", action="store_true", help="Compute labels for files containing 'seg'."
+    )
     parser.add_argument("--csv", type=Path, help="Optional CSV output path.")
     args = parser.parse_args()
 

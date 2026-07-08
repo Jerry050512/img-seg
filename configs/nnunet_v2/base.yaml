@@ -1,5 +1,16 @@
-model_key: nnunet_v2
+﻿model_key: nnunet_v2
 model_name: nnU-Net v2
+dataset:
+  id: 501
+  name: ImgSeg
+  channel_names:
+    "0": scan
+  labels:
+    background: 0
+    target: 1
+  mask_overrides:
+    1_23_XY: 1_23_XY.Seg.nii
+    S_1: S-1-Seg.nii
 task:
   type: binary_segmentation
   input_format: nifti
@@ -8,6 +19,7 @@ paths:
   nnunet_raw: dataset/processed/nnunet_raw
   nnunet_preprocessed: dataset/processed/nnunet_preprocessed
   nnunet_results: checkpoints/nnunet_v2
+  split_file: configs/data/split_seed42.yaml
 training:
   plans: auto
   trainer: nnUNetTrainer
