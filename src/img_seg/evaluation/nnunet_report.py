@@ -35,11 +35,8 @@ class EpochMetrics:
 
 
 def _parse_float_list(text: str) -> list[float]:
-    values = []
-    for item in re.split(r"[,\s]+", text.strip()):
-        if item:
-            values.append(float(item))
-    return values
+    normalized = re.sub(r"np\.float\d+\(([^)]+)\)", r"\1", text)
+    return [float(match) for match in re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", normalized)]
 
 
 def parse_training_log(log_path: str | Path) -> list[EpochMetrics]:
@@ -80,16 +77,22 @@ def find_latest_training_log(training_dir: str | Path) -> Path:
 def summarize(rows: list[EpochMetrics]) -> dict[str, Any]:
     if not rows:
         raise ValueError("No epoch metrics parsed")
+    complete_rows = [
+        row for row in rows if row.train_loss is not None or row.pseudo_dice is not None
+    ]
+    final = complete_rows[-1] if complete_rows else rows[-1]
     dice_rows = [row for row in rows if row.pseudo_dice is not None]
     best = max(dice_rows, key=lambda row: row.pseudo_dice) if dice_rows else None
     return {
         "epochs_observed": len(rows),
+        "epochs_complete": len(complete_rows),
         "last_epoch": rows[-1].epoch,
+        "last_complete_epoch": final.epoch if complete_rows else None,
         "best_pseudo_dice": best.pseudo_dice if best else None,
         "best_epoch": best.epoch if best else None,
-        "final_train_loss": rows[-1].train_loss,
-        "final_val_loss": rows[-1].val_loss,
-        "final_pseudo_dice": rows[-1].pseudo_dice,
+        "final_train_loss": final.train_loss,
+        "final_val_loss": final.val_loss,
+        "final_pseudo_dice": final.pseudo_dice,
     }
 
 
