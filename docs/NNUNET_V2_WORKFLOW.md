@@ -94,3 +94,16 @@ uv run imgseg-nnunet plan --dry-run
 uv run imgseg-nnunet train --configuration 2d --fold 0 --dry-run
 uv run imgseg-nnunet predict --configuration 2d --folds 0 --dry-run
 ```
+
+## 本机验证记录
+
+2026-07-08 在 RTX 4060 8GB 机器上已完成以下 smoke/集成验证：
+
+- `uv sync` 成功创建 `.venv` 并安装依赖。
+- `uv run pytest` 通过，当前 6 个测试全绿。
+- `uv run ruff check .` 通过。
+- `uv run imgseg-nnunet prepare` 已将真实 `dataset/` 转为 `Dataset501_ImgSeg`，划分为 train=6、val=1、test=1。
+- `uv run imgseg-nnunet plan` 已通过 nnU-Net v2 官方 `verify_dataset_integrity`，并完成 fingerprint、plans 与 2d/3d_fullres/3d_lowres 预处理。
+- 使用 `labelsTs` 对自身进行 identity evaluate，Dice/IoU/Precision/Recall 均为 1.0，确认评估链路能读取真实 NIfTI。
+
+当前尚未启动真实训练；建议先从 `2d fold 0` 开始训练。
