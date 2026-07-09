@@ -4,7 +4,11 @@ task:
   type: binary_segmentation
   input_format: 2d_slices
 data:
+  raw_dataset_dir: dataset
   split_file: configs/data/split_seed42.yaml
+  mask_overrides:
+    1_23_XY: 1_23_XY.Seg.nii
+    S_1: S-1-Seg.nii
   slice_axis: z
   image_size: [512, 512]
   foreground_slice_keep_ratio: 1.0
@@ -17,12 +21,19 @@ model:
   in_channels: 1
   classes: 1
 training:
+  seed: 42
   epochs: 100
   batch_size: 8
   amp: true
   optimizer: adamw
   learning_rate: 0.0003
   loss: dice_bce
+runtime:
+  device: auto
+  num_workers: 0
+checkpoints:
+  output_dir: checkpoints/efficientnet_b0
+  best: checkpoints/efficientnet_b0/best.pt
 inference:
   threshold: 0.5
   output_dir: outputs/efficientnet_b0

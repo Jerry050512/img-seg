@@ -46,6 +46,7 @@ uv sync
 - 数据集盘点：[docs/DATASET_AUDIT.md](docs/DATASET_AUDIT.md)
 - 项目结构：[docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)
 - nnU-Net v2 工作流：[docs/NNUNET_V2_WORKFLOW.md](docs/NNUNET_V2_WORKFLOW.md)
+- EfficientNet-B0 工作流：[docs/EFFICIENTNET_B0_WORKFLOW.md](docs/EFFICIENTNET_B0_WORKFLOW.md)
 - 模型调研与推荐：[docs/MODEL_RESEARCH.md](docs/MODEL_RESEARCH.md)
 - 三人协作规范：[docs/COLLABORATION.md](docs/COLLABORATION.md)
 - 贡献指南：[CONTRIBUTING.md](CONTRIBUTING.md)
@@ -58,6 +59,8 @@ uv sync
 ```powershell
 uv run python utils/audit_nifti.py dataset --labels
 uv run python utils/compress_nii.py dataset --recursive
+uv run imgseg-efficientnet train --config configs/efficientnet_b0/base.yaml
+uv run imgseg-predict --model efficientnet_b0 --checkpoint checkpoints/efficientnet_b0/best.pt --input-dir Test --output-dir Test_Seg
 ```
 
 ## WebUI
