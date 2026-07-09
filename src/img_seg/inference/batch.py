@@ -5,13 +5,15 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TextIO
 
 import matplotlib
 
@@ -99,6 +101,11 @@ def strip_known_suffix(path: Path) -> str:
     return path.stem
 
 
+def natural_sort_key(path: Path) -> list[int | str]:
+    parts = re.split(r"(\d+)", str(path).lower())
+    return [int(part) if part.isdigit() else part for part in parts]
+
+
 def sanitize_case_id(value: str) -> str:
     value = value.removesuffix("_0000")
     cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._-")
@@ -145,7 +152,7 @@ def _iter_supported_files(path: Path) -> list[Path]:
         for file in path.rglob("*")
         if file.is_file() and (is_nifti_path(file) or is_image_path(file))
     ]
-    return sorted(files, key=lambda item: str(item).lower())
+    return sorted(files, key=natural_sort_key)
 
 
 def collect_inputs(
@@ -168,7 +175,7 @@ def collect_inputs(
         resolved = path.resolve()
         if resolved not in seen_paths:
             seen_paths.add(resolved)
-            unique.append(path)
+            unique.append(resolved)
 
     used_ids: dict[str, int] = {}
     inputs: list[InferenceInput] = []
@@ -362,7 +369,10 @@ def _export_png_prediction(nifti_prediction_path: Path, output_path: Path) -> li
 def _checkpoint_name(checkpoint_path_or_name: str | Path | None) -> str | None:
     if not checkpoint_path_or_name:
         return None
-    return Path(checkpoint_path_or_name).name
+    name = Path(checkpoint_path_or_name).name
+    if not name.endswith(".pth"):
+        raise ValueError(f"Checkpoint must be a .pth file: {checkpoint_path_or_name}")
+    return name
 
 
 def _prepare_checkpoint_name(
@@ -377,6 +387,12 @@ def _prepare_checkpoint_name(
     checkpoint_path = Path(checkpoint_path_or_name)
     if not checkpoint_path.exists():
         return _checkpoint_name(checkpoint_path_or_name)
+    if not checkpoint_path.is_file():
+        raise ValueError(f"Checkpoint path is not a file: {checkpoint_path}")
+    if checkpoint_path.suffix != ".pth":
+        raise ValueError(f"Checkpoint must be a .pth file: {checkpoint_path}")
+    if checkpoint_path.stat().st_size == 0:
+        raise ValueError(f"Checkpoint file is empty: {checkpoint_path}")
 
     first_fold = str(folds).split(",")[0].strip() or "0"
     config = load_nnunet_config(config_path)
@@ -391,6 +407,25 @@ def _prepare_checkpoint_name(
     return target.name
 
 
+def _kill_process_tree(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        process.kill()
+
+
 def _terminate_process_tree(process: subprocess.Popen) -> None:
     if process.poll() is not None:
         return
@@ -402,7 +437,18 @@ def _terminate_process_tree(process: subprocess.Popen) -> None:
             stderr=subprocess.DEVNULL,
         )
         return
-    process.terminate()
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        process.terminate()
+
+
+def _drain_subprocess_output(stream: TextIO, output_tail: deque[str]) -> None:
+    for line in stream:
+        print(line, end="", flush=True)
+        output_tail.append(line.rstrip())
 
 
 def _run_nnunet_predict(
@@ -439,23 +485,43 @@ def _run_nnunet_predict(
 
     print("+ " + " ".join(command), flush=True)
     _raise_if_cancelled(cancel_event)
+    output_tail: deque[str] = deque(maxlen=80)
     process = subprocess.Popen(
         command,
         env=paths.env(deep_get(config, "runtime", {})),
         text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=1,
+        start_new_session=os.name != "nt",
     )
+    reader = None
+    if process.stdout is not None:
+        reader = threading.Thread(
+            target=_drain_subprocess_output,
+            args=(process.stdout, output_tail),
+            daemon=True,
+        )
+        reader.start()
     while process.poll() is None:
         if _is_cancelled(cancel_event):
             _terminate_process_tree(process)
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                process.kill()
+                _kill_process_tree(process)
                 process.wait()
+            if reader is not None:
+                reader.join(timeout=2)
             raise InferenceCancelledError("推理已由用户终止。")
         time.sleep(0.5)
+    if reader is not None:
+        reader.join(timeout=2)
     if process.returncode != 0:
-        raise subprocess.CalledProcessError(process.returncode, command)
+        tail = "\n".join(output_tail)
+        raise RuntimeError(
+            f"nnUNetv2_predict failed with exit code {process.returncode}.\n{tail}"
+        )
 
 
 def run_batch_inference(

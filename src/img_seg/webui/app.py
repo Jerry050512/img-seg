@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -30,7 +31,8 @@ from img_seg.inference import (
 APP_TITLE = "ImgSeg WebUI"
 DEFAULT_CONFIG = "configs/nnunet_v2/base.yaml"
 WEBUI_PROGRESS = gr.Progress(track_tqdm=True)
-WEBUI_CANCEL_EVENT = threading.Event()
+WEBUI_CANCEL_EVENTS: dict[str, threading.Event] = {}
+WEBUI_CANCEL_LOCK = threading.Lock()
 
 CSS = """
 :root {
@@ -206,6 +208,18 @@ def _selected_result(results: list[dict[str, Any]], case_id: str | None) -> dict
     return None
 
 
+def _get_cancel_event(cancel_token: str | None) -> tuple[str, threading.Event]:
+    token = cancel_token or uuid.uuid4().hex
+    with WEBUI_CANCEL_LOCK:
+        event = WEBUI_CANCEL_EVENTS.setdefault(token, threading.Event())
+    return token, event
+
+
+def _remove_cancel_event(cancel_token: str) -> None:
+    with WEBUI_CANCEL_LOCK:
+        WEBUI_CANCEL_EVENTS.pop(cancel_token, None)
+
+
 def run_inference_ui(
     model_key: str,
     checkpoint_dropdown: str,
@@ -217,11 +231,21 @@ def run_inference_ui(
     reference_files: list[object] | None,
     reference_directory: list[object] | None,
     output_dir: str,
+    cancel_token: str | None,
     progress: gr.Progress = WEBUI_PROGRESS,
 ) -> Iterator[
-    tuple[list[list[Any]], list[list[Any]], str, dict[str, Any], list[dict[str, Any]], None]
+    tuple[
+        list[list[Any]],
+        list[list[Any]],
+        str,
+        dict[str, Any],
+        list[dict[str, Any]],
+        None,
+        str,
+    ]
 ]:
-    WEBUI_CANCEL_EVENT.clear()
+    cancel_token, cancel_event = _get_cancel_event(cancel_token)
+    cancel_event.clear()
     checkpoint = checkpoint_path.strip() or checkpoint_dropdown
     uploads = [*(uploaded_files or []), *(uploaded_directory or [])]
     yield (
@@ -231,6 +255,7 @@ def run_inference_ui(
         gr.update(choices=[], value=None),
         [],
         None,
+        cancel_token,
     )
     try:
         progress(0.05, desc="Collecting inputs")
@@ -244,6 +269,7 @@ def run_inference_ui(
             gr.update(choices=[], value=None),
             [],
             None,
+            cancel_token,
         )
         progress(0.25, desc="Running nnU-Net prediction")
         results = run_batch_inference(
@@ -252,9 +278,10 @@ def run_inference_ui(
             checkpoint_path_or_name=checkpoint or None,
             output_dir=output_dir.strip() or DEFAULT_OUTPUT_DIR,
             config_path=DEFAULT_CONFIG,
-            cancel_event=WEBUI_CANCEL_EVENT,
+            cancel_event=cancel_event,
         )
     except InferenceCancelledError as exc:
+        _remove_cancel_event(cancel_token)
         yield (
             [],
             [],
@@ -262,9 +289,11 @@ def run_inference_ui(
             gr.update(choices=[], value=None),
             [],
             None,
+            cancel_token,
         )
         return
     except Exception as exc:
+        _remove_cancel_event(cancel_token)
         yield (
             [],
             [],
@@ -272,6 +301,7 @@ def run_inference_ui(
             gr.update(choices=[], value=None),
             [],
             None,
+            cancel_token,
         )
         return
     progress(0.95, desc="Preparing results")
@@ -305,6 +335,7 @@ def run_inference_ui(
         f"输出目录：{resolved_output_dir}"
     )
     choices = _result_choices(result_dicts)
+    _remove_cancel_event(cancel_token)
     yield (
         _result_rows(result_dicts),
         _metrics_rows(metrics),
@@ -312,11 +343,18 @@ def run_inference_ui(
         gr.update(choices=choices, value=choices[0] if choices else None),
         result_dicts,
         None,
+        cancel_token,
     )
 
 
-def stop_inference_ui() -> str:
-    WEBUI_CANCEL_EVENT.set()
+def stop_inference_ui(cancel_token: str | None) -> str:
+    if not cancel_token:
+        return "没有正在运行的推理任务。"
+    with WEBUI_CANCEL_LOCK:
+        event = WEBUI_CANCEL_EVENTS.get(cancel_token)
+    if event is None:
+        return "没有正在运行的推理任务。"
+    event.set()
     return "已请求终止推理，正在停止 nnU-Net 进程..."
 
 
@@ -332,7 +370,9 @@ def open_output_dir_ui(output_dir: str) -> str:
     return f"已打开输出目录：{path}"
 
 
-def clear_output_dir_ui(output_dir: str) -> str:
+def clear_output_dir_ui(output_dir: str, confirm_clear: bool) -> str:
+    if not confirm_clear:
+        return "请先勾选“确认清理输出”。"
     path = Path(output_dir.strip() or DEFAULT_OUTPUT_DIR).resolve()
     project_root = PROJECT_ROOT.resolve()
     protected_paths = {
@@ -409,6 +449,7 @@ def make_theme() -> gr.themes.ThemeClass:
 def build_app() -> gr.Blocks:
     with gr.Blocks(title=APP_TITLE) as app:
         results_state = gr.State([])
+        cancel_state = gr.State(None)
         with gr.Column(elem_id="imgseg-shell"):
             gr.HTML(
                 """
@@ -479,6 +520,7 @@ def build_app() -> gr.Blocks:
                             clear_output_button = gr.Button(
                                 "清理输出文件夹", variant="secondary"
                             )
+                    confirm_clear = gr.Checkbox(label="确认清理输出", value=False)
                     with gr.Row():
                         run_button = gr.Button(
                             "开始推理", variant="primary", elem_id="imgseg-run"
@@ -576,6 +618,7 @@ def build_app() -> gr.Blocks:
                     reference_files,
                     reference_directory,
                     output_dir,
+                    cancel_state,
                 ],
                 outputs=[
                     table,
@@ -584,10 +627,12 @@ def build_app() -> gr.Blocks:
                     result_selector,
                     results_state,
                     preview_image,
+                    cancel_state,
                 ],
             )
             stop_button.click(
                 stop_inference_ui,
+                inputs=cancel_state,
                 outputs=status,
                 queue=False,
                 cancels=[run_event],
@@ -600,7 +645,7 @@ def build_app() -> gr.Blocks:
             )
             clear_output_button.click(
                 clear_output_dir_ui,
-                inputs=output_dir,
+                inputs=[output_dir, confirm_clear],
                 outputs=status,
                 queue=False,
             )

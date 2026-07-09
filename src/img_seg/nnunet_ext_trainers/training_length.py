@@ -9,7 +9,13 @@ from __future__ import annotations
 import torch
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 
-DEFAULT_DEVICE = torch.device("cuda")
+
+def default_device() -> torch.device:
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
 
 
 class nnUNetTrainer_200epochs(nnUNetTrainer):
@@ -21,7 +27,7 @@ class nnUNetTrainer_200epochs(nnUNetTrainer):
         configuration: str,
         fold: int,
         dataset_json: dict,
-        device: torch.device = DEFAULT_DEVICE,
+        device: torch.device | None = None,
     ):
-        super().__init__(plans, configuration, fold, dataset_json, device)
+        super().__init__(plans, configuration, fold, dataset_json, device or default_device())
         self.num_epochs = 200

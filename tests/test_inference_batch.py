@@ -12,6 +12,7 @@ from img_seg.inference.batch import (
     collect_reference_masks,
     evaluate_result_metrics,
     list_checkpoints,
+    natural_sort_key,
     run_batch_inference,
 )
 from img_seg.io.nifti import require_nibabel
@@ -37,6 +38,16 @@ def test_collect_inputs_supports_nifti_images_and_unique_case_ids(tmp_path: Path
 
     assert [item.kind for item in inputs] == ["image", "nifti"]
     assert sorted(item.case_id for item in inputs) == ["Case_A", "Case_A_2"]
+
+
+def test_natural_sort_orders_numbered_cases_human_readably() -> None:
+    paths = [Path("Case10.nii.gz"), Path("Case2.nii.gz"), Path("Case1.nii.gz")]
+
+    assert [path.name for path in sorted(paths, key=natural_sort_key)] == [
+        "Case1.nii.gz",
+        "Case2.nii.gz",
+        "Case10.nii.gz",
+    ]
 
 
 def test_list_checkpoints_prefers_final_then_best(tmp_path: Path) -> None:
@@ -69,6 +80,23 @@ def test_list_checkpoints_prefers_final_then_best(tmp_path: Path) -> None:
         "checkpoint_final.pth",
         "checkpoint_best.pth",
     ]
+
+
+def test_prepare_checkpoint_name_rejects_non_checkpoint_file(tmp_path: Path) -> None:
+    bad_checkpoint = tmp_path / "checkpoint.txt"
+    bad_checkpoint.write_text("not a checkpoint", encoding="utf-8")
+
+    try:
+        batch._prepare_checkpoint_name(
+            bad_checkpoint,
+            config_path=tmp_path / "missing.yaml",
+            configuration="2d",
+            folds="0",
+        )
+    except ValueError as exc:
+        assert ".pth" in str(exc)
+    else:
+        raise AssertionError("Expected non-.pth checkpoint to be rejected")
 
 
 def test_run_batch_inference_exports_nifti_and_png(monkeypatch, tmp_path: Path) -> None:

@@ -64,3 +64,4 @@ uv run imgseg-webui
 ```
 
 WebUI 支持选择 nnU-Net v2 权重，对单个 NIfTI、NIfTI 文件夹、单张 `.jpg/.png` 或图片文件夹进行批量推理。默认输出目录为 `Test_Seg`，NIfTI 输出 `.nii.gz` 二值 mask，2D 图片输出同名 `.png` 二值 mask。
+普通图片会先按单通道单 slice 转为临时 NIfTI，并使用 identity affine，因此结果只表达像素空间分割，不包含真实物理间距。
