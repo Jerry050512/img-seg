@@ -230,6 +230,7 @@ def predict(
     paths = nnunet_paths_from_config(config)
     dataset_id = int(deep_get(config, "dataset.id"))
     dataset_name = str(deep_get(config, "dataset.name"))
+    trainer = str(deep_get(config, "training.trainer", "nnUNetTrainer"))
     dataset_dir = paths.raw / dataset_folder_name(dataset_id, dataset_name)
     input_path = Path(input_dir) if input_dir else dataset_dir / "imagesTs"
     output_path = resolve_project_path(output_dir or deep_get(config, "inference.output_dir"))
@@ -241,6 +242,8 @@ def predict(
         str(output_path),
         "-d",
         str(dataset_id),
+        "-tr",
+        trainer,
         "-c",
         configuration,
         "-f",
