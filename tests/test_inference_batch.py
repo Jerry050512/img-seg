@@ -6,7 +6,14 @@ import numpy as np
 import yaml
 
 from img_seg.inference import batch
-from img_seg.inference.batch import collect_inputs, list_checkpoints, run_batch_inference
+from img_seg.inference.batch import (
+    InferenceResult,
+    collect_inputs,
+    collect_reference_masks,
+    evaluate_result_metrics,
+    list_checkpoints,
+    run_batch_inference,
+)
 from img_seg.io.nifti import require_nibabel
 
 
@@ -102,3 +109,58 @@ def test_run_batch_inference_exports_nifti_and_png(monkeypatch, tmp_path: Path) 
     assert outputs["slice"].name == "slice.png"
     assert outputs["scan"].exists()
     assert outputs["slice"].exists()
+
+
+def test_evaluate_result_metrics_uses_reference_when_available(tmp_path: Path) -> None:
+    prediction_path = tmp_path / "case.nii.gz"
+    reference_path = tmp_path / "case_Seg.nii.gz"
+    write_nifti(prediction_path, np.array([[1, 1, 0], [0, 0, 0]], dtype=np.uint8))
+    write_nifti(reference_path, np.array([[1, 0, 1], [0, 0, 0]], dtype=np.uint8))
+    result = InferenceResult(
+        case_id="case",
+        input_kind="nifti",
+        input_path=tmp_path / "case_input.nii.gz",
+        output_path=prediction_path,
+        elapsed_sec=1.0,
+        shape=[2, 3],
+        status="done",
+    )
+
+    rows = evaluate_result_metrics([result], {"case": reference_path})
+
+    assert rows[0].foreground == 2
+    assert rows[0].foreground_ratio == 2 / 6
+    assert rows[0].dice == 0.5
+    assert rows[0].iou == 1 / 3
+
+
+def test_evaluate_result_metrics_reports_statistics_without_reference(tmp_path: Path) -> None:
+    prediction_path = tmp_path / "case.png"
+    write_png(prediction_path, np.array([[255, 0], [0, 0]], dtype=np.uint8))
+    result = InferenceResult(
+        case_id="case",
+        input_kind="image",
+        input_path=tmp_path / "case.png",
+        output_path=prediction_path,
+        elapsed_sec=1.0,
+        shape=[2, 2],
+        status="done",
+    )
+
+    rows = evaluate_result_metrics([result])
+
+    assert rows[0].foreground == 1
+    assert rows[0].total == 4
+    assert rows[0].dice is None
+    assert "No reference" in rows[0].message
+
+
+def test_collect_reference_masks_normalizes_labels_and_deduplicates(
+    tmp_path: Path,
+) -> None:
+    reference_path = tmp_path / "Case A_mask_0000.nii.gz"
+    write_nifti(reference_path, np.zeros((2, 2), dtype=np.uint8))
+
+    references = collect_reference_masks(tmp_path, [reference_path])
+
+    assert references == {"Case_A": reference_path}

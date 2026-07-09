@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from img_seg.config import deep_get, resolve_project_path
+from img_seg.evaluation.metrics import binary_metrics
 from img_seg.evaluation.visualize import choose_slice, normalize_image, take_slice
 from img_seg.io.nifti import binarize_mask, load_nifti_array, require_nibabel, save_like
 from img_seg.models.nnunet_v2 import (
@@ -72,6 +73,20 @@ class InferenceCancelledError(RuntimeError):
     """Raised when the user requests cancellation of a running inference."""
 
 
+@dataclass(frozen=True)
+class ResultMetrics:
+    case_id: str
+    foreground: int
+    total: int
+    foreground_ratio: float
+    dice: float | None = None
+    iou: float | None = None
+    precision: float | None = None
+    recall: float | None = None
+    reference_path: Path | None = None
+    message: str = ""
+
+
 def list_available_models() -> list[ModelInfo]:
     return [ModelInfo(key="nnunet_v2", label="nnU-Net v2 2D")]
 
@@ -88,6 +103,12 @@ def sanitize_case_id(value: str) -> str:
     value = value.removesuffix("_0000")
     cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._-")
     return cleaned or "case"
+
+
+def normalize_reference_case_id(path: Path) -> str:
+    case_id = sanitize_case_id(strip_known_suffix(path))
+    case_id = re.sub(r"([._-]?(seg|mask|label))$", "", case_id, flags=re.IGNORECASE)
+    return sanitize_case_id(case_id)
 
 
 def is_nifti_path(path: Path) -> bool:
@@ -164,6 +185,34 @@ def collect_inputs(
             "No supported input files found. Expected .nii, .nii.gz, .jpg, .jpeg, or .png."
         )
     return inputs
+
+
+def collect_reference_masks(
+    reference_path: str | Path | None = None,
+    uploaded_files: list[object] | None = None,
+) -> dict[str, Path]:
+    paths: list[Path] = []
+    if reference_path:
+        paths.extend(_iter_supported_files(resolve_project_path(reference_path)))
+    for uploaded in uploaded_files or []:
+        path = _coerce_upload_path(uploaded)
+        if path is not None:
+            paths.extend(_iter_supported_files(path))
+
+    references: dict[str, Path] = {}
+    seen_paths: set[Path] = set()
+    for path in paths:
+        resolved = path.resolve()
+        if resolved in seen_paths:
+            continue
+        seen_paths.add(resolved)
+        case_id = normalize_reference_case_id(path)
+        if case_id in references:
+            raise ValueError(
+                f"Duplicate reference mask for case {case_id}: {references[case_id]} and {path}"
+            )
+        references[case_id] = path
+    return references
 
 
 def list_checkpoints(
@@ -249,6 +298,19 @@ def _require_cv2():
     except ImportError as exc:
         raise RuntimeError("opencv-python is required for .jpg/.png WebUI inference.") from exc
     return cv2
+
+
+def _load_binary_mask(path: Path) -> np.ndarray:
+    if is_nifti_path(path):
+        data, _ = load_nifti_array(path)
+        return binarize_mask(data)
+    if is_image_path(path):
+        cv2 = _require_cv2()
+        image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if image is None:
+            raise ValueError(f"Could not read mask image: {path}")
+        return binarize_mask(image)
+    raise ValueError(f"Unsupported mask format: {path}")
 
 
 def _is_cancelled(cancel_event: threading.Event | None) -> bool:
@@ -472,6 +534,76 @@ def run_batch_inference(
             )
         )
     return results
+
+
+def evaluate_result_metrics(
+    results: list[InferenceResult],
+    references: dict[str, Path] | None = None,
+) -> list[ResultMetrics]:
+    references = references or {}
+    rows: list[ResultMetrics] = []
+    for result in results:
+        if result.status != "done":
+            rows.append(
+                ResultMetrics(
+                    case_id=result.case_id,
+                    foreground=0,
+                    total=0,
+                    foreground_ratio=0.0,
+                    message=result.message or "Prediction failed.",
+                )
+            )
+            continue
+
+        prediction = _load_binary_mask(result.output_path)
+        foreground = int(prediction.sum())
+        total = int(prediction.size)
+        foreground_ratio = foreground / total if total else 0.0
+        reference_path = references.get(result.case_id)
+        if reference_path is None:
+            rows.append(
+                ResultMetrics(
+                    case_id=result.case_id,
+                    foreground=foreground,
+                    total=total,
+                    foreground_ratio=foreground_ratio,
+                    message="No reference mask; showing prediction statistics only.",
+                )
+            )
+            continue
+
+        reference = _load_binary_mask(reference_path)
+        if prediction.shape != reference.shape:
+            rows.append(
+                ResultMetrics(
+                    case_id=result.case_id,
+                    foreground=foreground,
+                    total=total,
+                    foreground_ratio=foreground_ratio,
+                    reference_path=reference_path,
+                    message=(
+                        f"Reference shape mismatch: prediction {prediction.shape}, "
+                        f"reference {reference.shape}."
+                    ),
+                )
+            )
+            continue
+
+        metrics = binary_metrics(prediction, reference)
+        rows.append(
+            ResultMetrics(
+                case_id=result.case_id,
+                foreground=foreground,
+                total=total,
+                foreground_ratio=foreground_ratio,
+                dice=metrics.dice,
+                iou=metrics.iou,
+                precision=metrics.precision,
+                recall=metrics.recall,
+                reference_path=reference_path,
+            )
+        )
+    return rows
 
 
 def make_preview(

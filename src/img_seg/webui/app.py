@@ -19,6 +19,8 @@ from img_seg.inference import (
     DEFAULT_OUTPUT_DIR,
     InferenceCancelledError,
     collect_inputs,
+    collect_reference_masks,
+    evaluate_result_metrics,
     list_available_models,
     list_checkpoints,
     make_preview,
@@ -79,6 +81,9 @@ gradio-app,
 #imgseg-stop {
   border-color: #dc2626;
   color: #dc2626;
+}
+#imgseg-preview-button {
+  min-height: 72px;
 }
 .imgseg-status textarea {
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
@@ -152,6 +157,44 @@ def _result_rows(results: list[dict[str, Any]]) -> list[list[Any]]:
     return rows
 
 
+def _format_metric(value: float | None) -> str:
+    return "" if value is None else f"{value:.4f}"
+
+
+def _metrics_rows(metrics: list[Any]) -> list[list[Any]]:
+    rows: list[list[Any]] = []
+    for row in metrics:
+        rows.append(
+            [
+                row.case_id,
+                _format_metric(row.dice),
+                _format_metric(row.iou),
+                _format_metric(row.precision),
+                _format_metric(row.recall),
+                str(row.foreground),
+                f"{row.foreground_ratio:.4%}",
+                str(row.total),
+                str(row.reference_path or ""),
+                row.message,
+            ]
+        )
+    return rows
+
+
+def _metrics_summary(metrics: list[Any]) -> str:
+    evaluated = [row for row in metrics if row.dice is not None]
+    if not metrics:
+        return "未生成指标。"
+    if not evaluated:
+        return "未提供匹配 reference mask，仅显示预测前景统计。"
+    mean_dice = sum(row.dice for row in evaluated if row.dice is not None) / len(evaluated)
+    mean_iou = sum(row.iou for row in evaluated if row.iou is not None) / len(evaluated)
+    return (
+        f"已评估 {len(evaluated)}/{len(metrics)} 个样本，"
+        f"mean Dice={mean_dice:.4f}, mean IoU={mean_iou:.4f}"
+    )
+
+
 def _result_choices(results: list[dict[str, Any]]) -> list[str]:
     return [result["case_id"] for result in results if result["status"] == "done"]
 
@@ -170,13 +213,19 @@ def run_inference_ui(
     local_input_path: str,
     uploaded_files: list[object] | None,
     uploaded_directory: list[object] | None,
+    reference_path: str,
+    reference_files: list[object] | None,
+    reference_directory: list[object] | None,
     output_dir: str,
     progress: gr.Progress = WEBUI_PROGRESS,
-) -> Iterator[tuple[list[list[Any]], str, dict[str, Any], list[dict[str, Any]], None]]:
+) -> Iterator[
+    tuple[list[list[Any]], list[list[Any]], str, dict[str, Any], list[dict[str, Any]], None]
+]:
     WEBUI_CANCEL_EVENT.clear()
     checkpoint = checkpoint_path.strip() or checkpoint_dropdown
     uploads = [*(uploaded_files or []), *(uploaded_directory or [])]
     yield (
+        [],
         [],
         "正在收集输入文件...",
         gr.update(choices=[], value=None),
@@ -188,6 +237,7 @@ def run_inference_ui(
         inputs = collect_inputs(local_input_path.strip() or None, uploads)
         input_summary = ", ".join(f"{item.case_id}({item.kind})" for item in inputs)
         yield (
+            [],
             [],
             f"已加入 {len(inputs)} 个样本：{input_summary}\n正在启动 nnU-Net 推理，"
             "首次加载模型通常需要 1-3 分钟...",
@@ -207,6 +257,7 @@ def run_inference_ui(
     except InferenceCancelledError as exc:
         yield (
             [],
+            [],
             str(exc),
             gr.update(choices=[], value=None),
             [],
@@ -215,6 +266,7 @@ def run_inference_ui(
         return
     except Exception as exc:
         yield (
+            [],
             [],
             f"推理失败：{exc}",
             gr.update(choices=[], value=None),
@@ -236,13 +288,26 @@ def run_inference_ui(
         }
         for result in results
     ]
+    try:
+        reference_uploads = [*(reference_files or []), *(reference_directory or [])]
+        references = collect_reference_masks(reference_path.strip() or None, reference_uploads)
+        metrics = evaluate_result_metrics(results, references)
+        metrics_summary = _metrics_summary(metrics)
+    except Exception as exc:
+        metrics = []
+        metrics_summary = f"指标计算失败：{exc}"
     done = sum(1 for result in result_dicts if result["status"] == "done")
     failed = len(result_dicts) - done
     resolved_output_dir = Path(output_dir or DEFAULT_OUTPUT_DIR).resolve()
-    log = f"完成：{done}，失败：{failed}\n输出目录：{resolved_output_dir}"
+    log = (
+        f"完成：{done}，失败：{failed}\n"
+        f"{metrics_summary}\n"
+        f"输出目录：{resolved_output_dir}"
+    )
     choices = _result_choices(result_dicts)
     yield (
         _result_rows(result_dicts),
+        _metrics_rows(metrics),
         log,
         gr.update(choices=choices, value=choices[0] if choices else None),
         result_dicts,
@@ -280,6 +345,10 @@ def clear_output_dir_ui(output_dir: str) -> str:
         project_root / "checkpoints",
         project_root / ".git",
     }
+    try:
+        path.relative_to(project_root)
+    except ValueError:
+        return f"拒绝清理项目外目录：{path}"
     if path in protected_paths or path.anchor == str(path):
         return f"拒绝清理受保护目录：{path}"
     if not path.exists():
@@ -383,10 +452,33 @@ def build_app() -> gr.Blocks:
                         file_count="directory",
                         file_types=[".nii", ".nii.gz", ".png", ".jpg", ".jpeg"],
                     )
+                    reference_path = gr.Textbox(
+                        label="Reference mask 路径",
+                        placeholder="可选：单个 mask 或包含 mask 的文件夹，用于计算 Dice/IoU",
+                    )
+                    reference_files = gr.File(
+                        label="上传 reference mask",
+                        file_count="multiple",
+                        file_types=[".nii", ".nii.gz", ".png", ".jpg", ".jpeg"],
+                    )
+                    reference_directory = gr.File(
+                        label="上传 reference 文件夹",
+                        file_count="directory",
+                        file_types=[".nii", ".nii.gz", ".png", ".jpg", ".jpeg"],
+                    )
                     with gr.Row():
-                        output_dir = gr.Textbox(label="输出目录", value=str(DEFAULT_OUTPUT_DIR))
-                        open_output_button = gr.Button("打开输出文件夹", variant="secondary")
-                    clear_output_button = gr.Button("清理输出文件夹", variant="secondary")
+                        output_dir = gr.Textbox(
+                            label="输出目录",
+                            value=str(DEFAULT_OUTPUT_DIR),
+                            scale=3,
+                        )
+                        with gr.Column(scale=1, min_width=150):
+                            open_output_button = gr.Button(
+                                "打开输出文件夹", variant="secondary"
+                            )
+                            clear_output_button = gr.Button(
+                                "清理输出文件夹", variant="secondary"
+                            )
                     with gr.Row():
                         run_button = gr.Button(
                             "开始推理", variant="primary", elem_id="imgseg-run"
@@ -408,9 +500,43 @@ def build_app() -> gr.Blocks:
                         interactive=False,
                         wrap=True,
                     )
+                    metrics_table = gr.Dataframe(
+                        headers=[
+                            "case",
+                            "Dice",
+                            "IoU",
+                            "Precision",
+                            "Recall",
+                            "foreground",
+                            "foreground %",
+                            "total",
+                            "reference",
+                            "message",
+                        ],
+                        datatype=[
+                            "str",
+                            "str",
+                            "str",
+                            "str",
+                            "str",
+                            "str",
+                            "str",
+                            "str",
+                            "str",
+                            "str",
+                        ],
+                        label="指标 / 统计",
+                        interactive=False,
+                        wrap=True,
+                    )
                     with gr.Row():
                         result_selector = gr.Dropdown(label="预览", choices=[], interactive=True)
-                        preview_button = gr.Button("生成预览", variant="secondary")
+                        preview_button = gr.Button(
+                            "生成预览",
+                            variant="secondary",
+                            scale=1,
+                            elem_id="imgseg-preview-button",
+                        )
                     with gr.Row():
                         preview_axis = gr.Dropdown(
                             label="预览轴向",
@@ -424,6 +550,7 @@ def build_app() -> gr.Blocks:
                         )
                         preview_slice = gr.Number(
                             label="Slice index",
+                            value=None,
                             precision=0,
                             minimum=0,
                             interactive=True,
@@ -445,9 +572,19 @@ def build_app() -> gr.Blocks:
                     local_input_path,
                     uploaded_files,
                     uploaded_directory,
+                    reference_path,
+                    reference_files,
+                    reference_directory,
                     output_dir,
                 ],
-                outputs=[table, status, result_selector, results_state, preview_image],
+                outputs=[
+                    table,
+                    metrics_table,
+                    status,
+                    result_selector,
+                    results_state,
+                    preview_image,
+                ],
             )
             stop_button.click(
                 stop_inference_ui,
