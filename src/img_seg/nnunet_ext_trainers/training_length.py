@@ -1,4 +1,8 @@
-"""Project-local nnU-Net trainer variants."""
+"""Project-local nnU-Net trainer variants.
+
+These classes are discovered through nnU-Net's ``nnUNet_extTrainer`` directory
+scan. Keep each custom trainer in an importable Python module in this folder.
+"""
 
 from __future__ import annotations
 

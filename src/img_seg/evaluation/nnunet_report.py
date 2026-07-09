@@ -112,14 +112,19 @@ def _plot_series(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     epochs = [row.epoch for row in rows]
     plt.figure(figsize=(8, 5), dpi=150)
+    plotted = False
     for field in fields:
         values = [getattr(row, field) for row in rows]
         if any(value is not None for value in values):
             plt.plot(epochs, values, marker="o", linewidth=1.5, markersize=3, label=field)
+            plotted = True
+    if plotted:
+        plt.legend()
+    else:
+        plt.title("No data available")
     plt.xlabel("epoch")
     plt.ylabel(ylabel)
     plt.grid(True, alpha=0.3)
-    plt.legend()
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()

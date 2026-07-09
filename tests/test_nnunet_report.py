@@ -41,3 +41,19 @@ def test_parse_training_log_and_generate_report(tmp_path: Path) -> None:
     assert (output_dir / "pseudo_dice_curve.png").exists()
     metrics = json.loads((output_dir / "metrics.json").read_text(encoding="utf-8"))
     assert metrics["summary"]["best_epoch"] == 1
+
+
+def test_generate_report_writes_plot_when_metrics_are_missing(tmp_path: Path) -> None:
+    training_dir = tmp_path / "fold_0"
+    training_dir.mkdir()
+    (training_dir / "training_log_2026_07_09.txt").write_text(
+        "\n".join(["Epoch 0", "Epoch 1"]),
+        encoding="utf-8",
+    )
+
+    output_dir = tmp_path / "report"
+    summary = generate_report(training_dir, output_dir)
+
+    assert summary["epochs_complete"] == 0
+    assert (output_dir / "loss_curve.png").stat().st_size > 0
+    assert (output_dir / "pseudo_dice_curve.png").stat().st_size > 0
