@@ -475,7 +475,12 @@ def run_batch_inference(
 
 
 def make_preview(
-    input_path: str | Path, prediction_path: str | Path, preview_dir: str | Path
+    input_path: str | Path,
+    prediction_path: str | Path,
+    preview_dir: str | Path,
+    *,
+    axis: int | None = None,
+    slice_index: int | None = None,
 ) -> Path:
     input_path = Path(input_path)
     prediction_path = Path(prediction_path)
@@ -484,23 +489,50 @@ def make_preview(
     output_path = preview_dir / f"{strip_known_suffix(prediction_path)}_preview.png"
     if is_image_path(input_path):
         return _make_image_preview(input_path, prediction_path, output_path)
-    return _make_nifti_preview(input_path, prediction_path, output_path)
+    return _make_nifti_preview(
+        input_path,
+        prediction_path,
+        output_path,
+        axis=axis,
+        slice_index=slice_index,
+    )
 
 
-def _make_nifti_preview(image_path: Path, prediction_path: Path, output_path: Path) -> Path:
+def _make_nifti_preview(
+    image_path: Path,
+    prediction_path: Path,
+    output_path: Path,
+    *,
+    axis: int | None = None,
+    slice_index: int | None = None,
+) -> Path:
     image, _ = load_nifti_array(image_path)
     prediction, _ = load_nifti_array(prediction_path)
     pred_mask = binarize_mask(prediction)
-    axis = 2 if pred_mask.ndim >= 3 else pred_mask.ndim - 1
-    index = choose_slice(pred_mask, axis)
-    image_slice = normalize_image(take_slice(np.asarray(image), axis, index))
-    pred_slice = take_slice(pred_mask, axis, index)
+    if pred_mask.ndim == 2:
+        index = 0
+        image_slice = normalize_image(np.asarray(image))
+        pred_slice = pred_mask
+    else:
+        axis = 2 if axis is None else axis
+        if axis < 0 or axis >= pred_mask.ndim:
+            raise ValueError(f"Preview axis {axis} is out of range for shape {pred_mask.shape}")
+        index = choose_slice(pred_mask, axis) if slice_index is None else slice_index
+        if index < 0 or index >= pred_mask.shape[axis]:
+            raise ValueError(
+                f"Preview slice {index} is out of range for axis {axis} "
+                f"with size {pred_mask.shape[axis]}"
+            )
+        image_slice = normalize_image(take_slice(np.asarray(image), axis, index))
+        pred_slice = take_slice(pred_mask, axis, index)
+    mask_display = np.rot90(pred_slice).astype(float)
 
     plt.figure(figsize=(7, 7), dpi=150)
     plt.imshow(np.rot90(image_slice), cmap="gray")
     if np.any(pred_slice):
-        plt.contour(np.rot90(pred_slice), levels=[0.5], colors=["#ef4444"], linewidths=1.0)
-    plt.title(f"slice={index}, red=prediction")
+        plt.imshow(mask_display, cmap="Reds", alpha=mask_display * 0.35, vmin=0, vmax=1)
+        plt.contour(mask_display, levels=[0.5], colors=["#dc2626"], linewidths=0.8)
+    plt.title(f"slice={index}, red=prediction region")
     plt.axis("off")
     plt.tight_layout()
     plt.savefig(output_path)

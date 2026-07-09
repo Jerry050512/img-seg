@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
+import subprocess
+import sys
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -10,6 +14,7 @@ from typing import Any
 
 import gradio as gr
 
+from img_seg.config import PROJECT_ROOT
 from img_seg.inference import (
     DEFAULT_OUTPUT_DIR,
     InferenceCancelledError,
@@ -250,10 +255,55 @@ def stop_inference_ui() -> str:
     return "已请求终止推理，正在停止 nnU-Net 进程..."
 
 
+def open_output_dir_ui(output_dir: str) -> str:
+    path = Path(output_dir.strip() or DEFAULT_OUTPUT_DIR).resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        os.startfile(path)  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path)])
+    return f"已打开输出目录：{path}"
+
+
+def clear_output_dir_ui(output_dir: str) -> str:
+    path = Path(output_dir.strip() or DEFAULT_OUTPUT_DIR).resolve()
+    project_root = PROJECT_ROOT.resolve()
+    protected_paths = {
+        project_root,
+        project_root / "src",
+        project_root / "tests",
+        project_root / "configs",
+        project_root / "docs",
+        project_root / "dataset",
+        project_root / "checkpoints",
+        project_root / ".git",
+    }
+    if path in protected_paths or path.anchor == str(path):
+        return f"拒绝清理受保护目录：{path}"
+    if not path.exists():
+        path.mkdir(parents=True, exist_ok=True)
+        return f"输出目录不存在，已创建空目录：{path}"
+    if not path.is_dir():
+        return f"输出路径不是文件夹，未清理：{path}"
+
+    removed = 0
+    for child in path.iterdir():
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+        removed += 1
+    return f"已清理输出目录：{path}，删除 {removed} 个项目。"
+
+
 def preview_result_ui(
     case_id: str | None,
     results: list[dict[str, Any]] | None,
     output_dir: str,
+    preview_axis: str,
+    slice_index: float | None,
 ) -> tuple[str | None, str]:
     if not case_id or not results:
         return None, ""
@@ -261,7 +311,14 @@ def preview_result_ui(
     if result is None:
         return None, ""
     preview_dir = Path(output_dir.strip() or DEFAULT_OUTPUT_DIR) / "_previews"
-    preview = make_preview(result["input_path"], result["output_path"], preview_dir)
+    requested_slice = None if slice_index is None else int(slice_index)
+    preview = make_preview(
+        result["input_path"],
+        result["output_path"],
+        preview_dir,
+        axis=int(preview_axis),
+        slice_index=requested_slice,
+    )
     return str(preview), f"{result['case_id']} -> {result['output_path']}"
 
 
@@ -326,7 +383,10 @@ def build_app() -> gr.Blocks:
                         file_count="directory",
                         file_types=[".nii", ".nii.gz", ".png", ".jpg", ".jpeg"],
                     )
-                    output_dir = gr.Textbox(label="输出目录", value=str(DEFAULT_OUTPUT_DIR))
+                    with gr.Row():
+                        output_dir = gr.Textbox(label="输出目录", value=str(DEFAULT_OUTPUT_DIR))
+                        open_output_button = gr.Button("打开输出文件夹", variant="secondary")
+                    clear_output_button = gr.Button("清理输出文件夹", variant="secondary")
                     with gr.Row():
                         run_button = gr.Button(
                             "开始推理", variant="primary", elem_id="imgseg-run"
@@ -351,6 +411,23 @@ def build_app() -> gr.Blocks:
                     with gr.Row():
                         result_selector = gr.Dropdown(label="预览", choices=[], interactive=True)
                         preview_button = gr.Button("生成预览", variant="secondary")
+                    with gr.Row():
+                        preview_axis = gr.Dropdown(
+                            label="预览轴向",
+                            choices=[
+                                ("Axial / Z", "2"),
+                                ("Coronal / Y", "1"),
+                                ("Sagittal / X", "0"),
+                            ],
+                            value="2",
+                            interactive=True,
+                        )
+                        preview_slice = gr.Number(
+                            label="Slice index",
+                            precision=0,
+                            minimum=0,
+                            interactive=True,
+                        )
                     preview_image = gr.Image(label="分割预览", type="filepath", height=560)
                     preview_status = gr.Textbox(label="预览状态", interactive=False)
 
@@ -378,14 +455,26 @@ def build_app() -> gr.Blocks:
                 queue=False,
                 cancels=[run_event],
             )
+            open_output_button.click(
+                open_output_dir_ui,
+                inputs=output_dir,
+                outputs=status,
+                queue=False,
+            )
+            clear_output_button.click(
+                clear_output_dir_ui,
+                inputs=output_dir,
+                outputs=status,
+                queue=False,
+            )
             preview_button.click(
                 preview_result_ui,
-                inputs=[result_selector, results_state, output_dir],
+                inputs=[result_selector, results_state, output_dir, preview_axis, preview_slice],
                 outputs=[preview_image, preview_status],
             )
             result_selector.change(
                 preview_result_ui,
-                inputs=[result_selector, results_state, output_dir],
+                inputs=[result_selector, results_state, output_dir, preview_axis, preview_slice],
                 outputs=[preview_image, preview_status],
             )
     return app
