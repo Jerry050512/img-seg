@@ -1,4 +1,4 @@
-﻿model_key: nnunet_v2
+model_key: nnunet_v2
 model_name: nnU-Net v2
 dataset:
   id: 501
@@ -22,11 +22,17 @@ paths:
   split_file: configs/data/split_seed42.yaml
 training:
   plans: auto
-  trainer: nnUNetTrainer
+  trainer: nnUNetTrainer_200epochs
   configurations:
     - 2d
     - 3d_lowres
   fold: 0
+runtime:
+  nnunet_n_proc_da: 1
+  nnunet_def_n_proc: 2
+  nnunet_npp: 1
+  nnunet_nps: 1
+  nnunet_ext_trainer: src/img_seg/nnunet_ext_trainers
 inference:
   output_dir: outputs/nnunet_v2
 notes:

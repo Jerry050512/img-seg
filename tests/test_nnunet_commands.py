@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from img_seg.models.nnunet_v2 import plan_and_preprocess, predict, train
+from img_seg.models.nnunet_v2 import NnUNetPaths, plan_and_preprocess, predict, train
 
 
 def write_command_config(tmp_path: Path) -> Path:
@@ -31,4 +31,29 @@ def test_nnunet_command_wrappers_support_dry_run(tmp_path: Path) -> None:
 
     plan_and_preprocess(config_path, dry_run=True)
     train(config_path, configuration="2d", fold=0, dry_run=True)
+    train(config_path, configuration="2d", fold=0, continue_training=True, dry_run=True)
     predict(config_path, configuration="2d", folds="0", dry_run=True)
+
+
+def test_nnunet_runtime_env_supports_worker_and_external_trainer_paths(tmp_path: Path) -> None:
+    paths = NnUNetPaths(
+        raw=tmp_path / "raw",
+        preprocessed=tmp_path / "preprocessed",
+        results=tmp_path / "results",
+    )
+
+    env = paths.env(
+        {
+            "nnunet_n_proc_da": 1,
+            "nnunet_def_n_proc": 2,
+            "nnunet_npp": 1,
+            "nnunet_nps": 1,
+            "nnunet_ext_trainer": str(tmp_path / "trainers"),
+        }
+    )
+
+    assert env["nnUNet_n_proc_DA"] == "1"
+    assert env["nnUNet_def_n_proc"] == "2"
+    assert env["nnUNet_npp"] == "1"
+    assert env["nnUNet_nps"] == "1"
+    assert env["nnUNet_extTrainer"] == str(tmp_path / "trainers")

@@ -33,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser = subparsers.add_parser("train", help="Run nnU-Net training.")
     train_parser.add_argument("--configuration", default="2d")
     train_parser.add_argument("--fold", default="0")
+    train_parser.add_argument("--continue-training", action="store_true")
     train_parser.add_argument("--dry-run", action="store_true")
 
     predict_parser = subparsers.add_parser("predict", help="Run nnU-Net prediction.")
@@ -40,6 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     predict_parser.add_argument("--output-dir")
     predict_parser.add_argument("--configuration", default="2d")
     predict_parser.add_argument("--folds", default="0")
+    predict_parser.add_argument("--checkpoint-name")
     predict_parser.add_argument("--dry-run", action="store_true")
 
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate predictions against labels.")
@@ -69,6 +71,7 @@ def main() -> None:
             config_path,
             configuration=args.configuration,
             fold=args.fold,
+            continue_training=args.continue_training,
             dry_run=args.dry_run,
         )
     elif args.command == "predict":
@@ -78,6 +81,7 @@ def main() -> None:
             output_dir=args.output_dir,
             configuration=args.configuration,
             folds=args.folds,
+            checkpoint_name=args.checkpoint_name,
             dry_run=args.dry_run,
         )
     elif args.command == "evaluate":
