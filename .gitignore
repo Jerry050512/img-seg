@@ -15,6 +15,7 @@ dist/
 # Generated artifacts
 checkpoints/
 outputs/
+Test_Seg/
 runs/
 wandb/
 mlruns/
