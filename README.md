@@ -48,6 +48,9 @@ uv sync
 - nnU-Net v2 工作流：[docs/NNUNET_V2_WORKFLOW.md](docs/NNUNET_V2_WORKFLOW.md)
 - 模型调研与推荐：[docs/MODEL_RESEARCH.md](docs/MODEL_RESEARCH.md)
 - 三人协作规范：[docs/COLLABORATION.md](docs/COLLABORATION.md)
+- 贡献指南：[CONTRIBUTING.md](CONTRIBUTING.md)
+- 行为准则：[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- 安全政策：[SECURITY.md](SECURITY.md)
 - 智能体开发规则：[AGENTS.md](AGENTS.md)
 
 ## 常用工具
@@ -65,3 +68,9 @@ uv run imgseg-webui
 
 WebUI 支持选择 nnU-Net v2 权重，对单个 NIfTI、NIfTI 文件夹、单张 `.jpg/.png` 或图片文件夹进行批量推理。默认输出目录为 `Test_Seg`，NIfTI 输出 `.nii.gz` 二值 mask，2D 图片输出同名 `.png` 二值 mask。
 普通图片会先按单通道单 slice 转为临时 NIfTI，并使用 identity affine，因此结果只表达像素空间分割，不包含真实物理间距。
+
+## 社区与许可
+
+欢迎通过 issue 和 pull request 参与改进。提交前请阅读 [贡献指南](CONTRIBUTING.md)，并确认没有提交原始医学影像、训练权重或预测结果。
+
+本项目代码使用 [MIT License](LICENSE)。数据集、模型权重和课程材料如有单独授权，应以其原始授权和课程要求为准。

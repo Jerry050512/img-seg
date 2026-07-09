@@ -1,0 +1,63 @@
+name: Bug report
+description: 报告可复现的问题、异常或回归
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请尽量提供可复现信息，避免上传原始医学影像数据或敏感路径。
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题描述
+      description: 简要说明发生了什么，以及你预期应该发生什么。
+      placeholder: 运行 WebUI 批量推理时...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 请列出命令、配置文件、输入类型和必要上下文。
+      placeholder: |
+        1. 执行 `uv run ...`
+        2. 使用配置 `configs/...`
+        3. 观察到 ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或截图
+      description: 请粘贴关键报错。提交前请移除敏感路径、凭据和受限数据链接。
+      render: text
+  - type: dropdown
+    id: area
+    attributes:
+      label: 影响范围
+      options:
+        - 数据处理
+        - 训练
+        - 推理
+        - 评估指标
+        - WebUI
+        - 文档或配置
+        - 其他
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 环境
+      description: 操作系统、Python、CUDA/GPU、uv 版本等。
+      placeholder: Windows 11, Python 3.12, CUDA 12.1, uv ...
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交前检查
+      options:
+        - label: 我没有上传原始 NIfTI 数据、训练权重、预测结果或敏感信息。
+          required: true
+        - label: 我已搜索现有 issue，确认不是明显重复问题。
+          required: true

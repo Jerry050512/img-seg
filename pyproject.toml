@@ -3,6 +3,7 @@ name = "img-seg"
 version = "0.1.0"
 description = "Course project for NIfTI image segmentation with nnU-Net v2, MONAI SegResNet, and EfficientNet-B0 based lightweight segmentation."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "albumentations>=2.0.0",
