@@ -56,3 +56,11 @@ uv sync
 uv run python utils/audit_nifti.py dataset --labels
 uv run python utils/compress_nii.py dataset --recursive
 ```
+
+## WebUI
+
+```powershell
+uv run imgseg-webui
+```
+
+WebUI 支持选择 nnU-Net v2 权重，对单个 NIfTI、NIfTI 文件夹、单张 `.jpg/.png` 或图片文件夹进行批量推理。默认输出目录为 `Test_Seg`，NIfTI 输出 `.nii.gz` 二值 mask，2D 图片输出同名 `.png` 二值 mask。
