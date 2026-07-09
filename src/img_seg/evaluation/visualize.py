@@ -16,7 +16,7 @@ def normalize_image(image: np.ndarray) -> np.ndarray:
     low, high = np.percentile(image, [1, 99])
     if high <= low:
         return np.zeros_like(image)
-    return np.clip((image - low) / (high - low), 0, 1)
+    return np.clip((image - low) / (high - low), 0, 1).astype(np.float32)
 
 
 def choose_slice(mask: np.ndarray, axis: int) -> int:
