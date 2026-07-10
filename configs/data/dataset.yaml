@@ -1,0 +1,9 @@
+root: dataset
+layout: case_dir_pair
+image_name: image.nii.gz
+mask_name: mask.nii.gz
+mask_policy: nonzero_to_one
+case_id_policy: directory_name
+exclude:
+  - processed
+  - _standardizing_tmp

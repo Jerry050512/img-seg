@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 
 from img_seg.config import deep_get, load_yaml, project_path_from_config, resolve_project_path
-from img_seg.data.cases import SegmentationCase, discover_cases
+from img_seg.data.cases import SegmentationCase, discover_cases, load_cases_from_manifest
 from img_seg.data.splits import CaseSplit, make_case_split
 from img_seg.evaluation.metrics import binary_metrics
 from img_seg.io.nifti import binarize_mask, load_nifti_array, require_nibabel, save_like
@@ -124,6 +124,39 @@ def _write_nnunet_splits(preprocessed_dataset_dir: Path, split: CaseSplit) -> No
         f.write("\n")
 
 
+def _load_cases(config: dict[str, Any]) -> list[SegmentationCase]:
+    dataset_file = deep_get(config, "paths.dataset_file") or deep_get(
+        config, "data.dataset_config"
+    )
+    if dataset_file:
+        return load_cases_from_manifest(resolve_project_path(dataset_file))
+
+    raw_dataset_dir = project_path_from_config(config, "paths.raw_dataset_dir")
+    return discover_cases(
+        raw_dataset_dir,
+        image_overrides=deep_get(config, "dataset.image_overrides", {}),
+        mask_overrides=deep_get(config, "dataset.mask_overrides", {}),
+        require_masks=True,
+        recursive=bool(deep_get(config, "dataset.recursive", False)),
+    )
+
+
+def _validate_case_geometries(cases: list[SegmentationCase]) -> None:
+    nib = require_nibabel()
+    for case in cases:
+        if case.mask_path is None:
+            continue
+        image = nib.load(str(case.image_path))
+        mask = nib.load(str(case.mask_path))
+        if image.shape != mask.shape:
+            raise ValueError(
+                f"Image/mask shape mismatch for {case.case_id}: "
+                f"{image.shape} vs {mask.shape}"
+            )
+        if not np.allclose(image.affine, mask.affine):
+            raise ValueError(f"Image/mask affine mismatch for {case.case_id}")
+
+
 def prepare_nnunet_dataset(config_path: str | Path) -> PreparedDataset:
     """Convert local cases into the nnU-Net v2 raw dataset layout."""
 
@@ -134,12 +167,8 @@ def prepare_nnunet_dataset(config_path: str | Path) -> PreparedDataset:
     dataset_name = str(deep_get(config, "dataset.name"))
     dataset_dir = paths.raw / dataset_folder_name(dataset_id, dataset_name)
 
-    raw_dataset_dir = project_path_from_config(config, "paths.raw_dataset_dir")
-    cases = discover_cases(
-        raw_dataset_dir,
-        mask_overrides=deep_get(config, "dataset.mask_overrides", {}),
-        require_masks=True,
-    )
+    cases = _load_cases(config)
+    _validate_case_geometries(cases)
     split_config = load_yaml(project_path_from_config(config, "paths.split_file"))
     ratios = split_config.get("ratios", {})
     split = make_case_split(
