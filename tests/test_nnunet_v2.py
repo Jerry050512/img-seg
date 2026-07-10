@@ -91,3 +91,50 @@ def test_prepare_nnunet_dataset_and_evaluate(tmp_path: Path) -> None:
     result = evaluate_predictions(prediction_dir, dataset_dir_out / "labelsTs")
     assert result["summary"]["dice"] == 1.0
     assert result["summary"]["iou"] == 1.0
+
+
+def test_prepare_nnunet_dataset_prefers_dataset_config_layout(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "dataset"
+    for raw_name in ("case_one", "case_two", "case_three"):
+        write_nifti(dataset_dir / raw_name / "image.nii.gz", np.zeros((4, 4, 3), dtype=np.uint8))
+        mask = np.zeros((4, 4, 3), dtype=np.uint16)
+        mask[1:3, 1:3, 1] = 1
+        write_nifti(dataset_dir / raw_name / "mask.nii.gz", mask)
+
+    manifest_path = tmp_path / "dataset.yaml"
+    manifest_path.write_text(
+        yaml.safe_dump(
+            {
+                "root": str(dataset_dir),
+                "layout": "case_dir_pair",
+                "image_name": "image.nii.gz",
+                "mask_name": "mask.nii.gz",
+                "case_id_policy": "directory_name",
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    split_file = tmp_path / "split.yaml"
+    split_file.write_text(
+        yaml.safe_dump(
+            {"seed": 1, "ratios": {"train": 0.34, "val": 0.33, "test": 0.33}},
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    config_path = write_config(tmp_path, tmp_path / "unused_raw_dataset", split_file)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["paths"]["dataset_file"] = str(manifest_path)
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    prepared = prepare_nnunet_dataset(config_path)
+
+    assert sorted(case.case_id for case in prepared.cases) == [
+        "case_one",
+        "case_three",
+        "case_two",
+    ]
+    dataset_dir_out = tmp_path / "nnunet_raw" / dataset_folder_name(777, "Tiny")
+    assert len(list((dataset_dir_out / "imagesTr").glob("*_0000.nii.gz"))) == 2
+    assert len(list((dataset_dir_out / "labelsTs").glob("*.nii.gz"))) == 1

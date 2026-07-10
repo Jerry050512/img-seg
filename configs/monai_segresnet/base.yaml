@@ -4,6 +4,7 @@ task:
   type: binary_segmentation
   input_format: nifti
 data:
+  dataset_config: configs/data/dataset.yaml
   split_file: configs/data/split_seed42.yaml
   roi_size: [96, 96, 64]
   spacing: [1.0, 1.0, 1.0]

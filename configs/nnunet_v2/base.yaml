@@ -8,13 +8,11 @@ dataset:
   labels:
     background: 0
     target: 1
-  mask_overrides:
-    1_23_XY: 1_23_XY.Seg.nii
-    S_1: S-1-Seg.nii
 task:
   type: binary_segmentation
   input_format: nifti
 paths:
+  dataset_file: configs/data/dataset.yaml
   raw_dataset_dir: dataset
   nnunet_raw: dataset/processed/nnunet_raw
   nnunet_preprocessed: dataset/processed/nnunet_preprocessed

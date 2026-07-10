@@ -110,6 +110,18 @@ def iter_nifti(root: Path) -> list[Path]:
     )
 
 
+def should_summarize_labels(path: Path) -> bool:
+    name = path.name.lower()
+    parent_names = {parent.name.lower() for parent in path.parents}
+    return (
+        "seg" in name
+        or "mask" in name
+        or "label" in name
+        or "labelstr" in parent_names
+        or "labelsts" in parent_names
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("path", type=Path)
@@ -123,7 +135,7 @@ def main() -> None:
     for path in iter_nifti(args.path):
         header = read_header(path)
         labels, foreground = ("", "")
-        if args.labels and "seg" in path.name.lower():
+        if args.labels and should_summarize_labels(path):
             labels, foreground = label_summary(path, header)
         rows.append(
             {

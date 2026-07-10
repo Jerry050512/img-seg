@@ -1,50 +1,132 @@
 # 数据集盘点
 
-盘点时间：2026-07-08。当前 `dataset/` 下共有 8 个样本目录，扫描图像与 mask 的空间尺寸均能一一对应，但命名与标签值尚未统一。
+盘点时间：2026-07-10。当前 `dataset/` 下共有 13 个规范化原始样本目录，
+每个目录均只保留一对 `image.nii.gz` 与 `mask.nii.gz`。布局规则配置为
+`configs/data/dataset.yaml`。
+
+旧原始目录已移动备份到：
+
+```text
+C:\tmp\img_seg_raw_before_standardize_20260710_101836
+```
+
+## 当前原始数据结构
+
+```text
+dataset/<case_id>/
+  image.nii.gz
+  mask.nii.gz
+```
+
+规范化规则：
+
+- case id 统一为 ASCII 字母、数字和下划线。
+- 图像与 mask 均统一压缩为 `.nii.gz`。
+- mask 均为 `uint8`，标签集合均为 `0,1`。
+- `S_1` 原始来源中的 `65535` 标签已按二分类任务转为 `1`。
+- `nose_layer36` 原始来源中的标签 `2` 已按二分类任务转为 `1`。
+- 所有样本 spacing 当前均为 1.0x1.0x1.0。
 
 ## 样本清单
 
-| case | image | image shape | image dtype | mask | mask labels | foreground |
-|---|---|---:|---|---|---|---:|
-| `1_23_XY` | `1_23_XY.nii.gz` | 973x973x312 | uint8 | `1_23_XY.Seg.nii` | 0, 1 | 32.9006% |
-| `1_23_XY` | `1_23_XY.nii.gz` | 973x973x312 | uint8 | `1_23_XY_Seg(1).nii` | 0, 1 | 29.9702% |
-| `H1-20Layer` | `H1-20Layer.nii` | 512x512x351 | uint8 | `H1-20Layer_Seg.nii` | 0, 1 | 17.1682% |
-| `H2-4Layer` | `H2-4Layer.nii` | 512x512x281 | uint8 | `H2-4Layer_Seg.nii` | 0, 1 | 17.6148% |
-| `nose_layer28` | `nose_layer28.nii` | 1312x912x194 | uint8 | `nose_layer28_Seg.nii` | 0, 1 | 9.9428% |
-| `nose_layer36` | `nose_layer36.nii` | 516x910x179 | uint8 | `nose_layer36_Seg(1)(1).nii` | 0, 1, 2 | 11.3416% |
-| `nose_layer4` | `nose_layer4.nii` | 1317x914x156 | uint8 | `nose_layer4_Seg.nii` | 0, 1 | 29.7497% |
-| `S-3` | `S-3.nii` | 512x512x291 | uint8 | `S-3_Seg.nii` | 0, 1 | 42.7604% |
-| `S_1` | `S-1.nii` | 512x512x216 | uint8 | `S-1-Seg.nii` | 0, 1 | 43.2832% |
-| `S_1` | `S-1.nii` | 512x512x216 | uint8 | `S_1_Seg.nii.gz` | 0, 65535 | 44.4292% |
+| case_id | image | mask | shape | mask labels | foreground |
+|---|---|---|---:|---|---:|
+| `1_23_XY` | `image.nii.gz` | `mask.nii.gz` | 973x973x312 | 0,1 | 32.9006% |
+| `2_25_XY` | `image.nii.gz` | `mask.nii.gz` | 973x973x298 | 0,1 | 40.9696% |
+| `H1_20Layer` | `image.nii.gz` | `mask.nii.gz` | 512x512x351 | 0,1 | 17.1682% |
+| `H2_4Layer` | `image.nii.gz` | `mask.nii.gz` | 512x512x281 | 0,1 | 17.6148% |
+| `nose_layer4` | `image.nii.gz` | `mask.nii.gz` | 1317x914x156 | 0,1 | 29.7497% |
+| `nose_layer12` | `image.nii.gz` | `mask.nii.gz` | 1319x914x245 | 0,1 | 44.3694% |
+| `nose_layer20` | `image.nii.gz` | `mask.nii.gz` | 1316x913x271 | 0,1 | 25.4778% |
+| `nose_layer28` | `image.nii.gz` | `mask.nii.gz` | 1312x912x194 | 0,1 | 9.9428% |
+| `nose_layer36` | `image.nii.gz` | `mask.nii.gz` | 516x910x179 | 0,1 | 11.3416% |
+| `S_1` | `image.nii.gz` | `mask.nii.gz` | 512x512x216 | 0,1 | 44.4292% |
+| `S_3` | `image.nii.gz` | `mask.nii.gz` | 512x512x291 | 0,1 | 42.7604% |
+| `S_4` | `image.nii.gz` | `mask.nii.gz` | 512x512x331 | 0,1 | 46.0658% |
+| `S_5` | `image.nii.gz` | `mask.nii.gz` | 512x512x331 | 0,1 | 44.9559% |
 
-全部样本 spacing 当前均为 1.0x1.0x1.0。
+## 训练读取入口
 
-## 需要人工确认的问题
-
-1. `1_23_XY` 有两个 mask，尺寸相同但哈希不同，前景比例也不同；需要确认哪个是最终标注，或是否分别代表不同版本。
-2. `S_1` 同时存在 `S-1-Seg.nii` 和 `S_1_Seg.nii.gz`，后者标签值为 `65535` 而不是 `1`；需要统一为二值 `0/1`。
-3. `nose_layer36` 的 mask 出现标签 `2`；若课程任务是二分类分割，应在预处理阶段把所有非零标签映射为 `1`，并在报告中说明。
-4. 命名格式混用 `S_1`、`S-1`、`Seg(1)(1)` 等，后续扩充数据前建议统一命名。
-
-## 建议数据规范
-
-后续新增样本建议按以下格式放置，原始数据只读保存，训练时再生成 processed 版本：
+三个模型配置均指向同一份数据布局配置：
 
 ```text
-dataset/raw/<case_id>/
-  image.nii.gz
-  mask.nii.gz
-
-dataset/processed/
-  slices_2d/
-  patches_3d/
-dataset/splits/
-  split_seed42.json
+configs/data/dataset.yaml
 ```
 
-建议预处理策略：
+nnU-Net v2 配置：
 
-- mask 统一转为 `uint8`，标签统一为 `0/1`。
-- `.nii` 统一压缩为 `.nii.gz`；压缩不改变体素数据，只改变存储方式。
-- 划分训练/验证/测试时按 case 划分，不按 slice 随机混合，避免同一体数据泄漏到训练和测试两边。
+```yaml
+paths:
+  dataset_file: configs/data/dataset.yaml
+  raw_dataset_dir: dataset
+  nnunet_raw: dataset/processed/nnunet_raw
+  nnunet_preprocessed: dataset/processed/nnunet_preprocessed
+```
 
+MONAI SegResNet 与 EfficientNet-B0 配置：
+
+```yaml
+data:
+  dataset_config: configs/data/dataset.yaml
+  split_file: configs/data/split_seed42.yaml
+```
+
+`prepare_nnunet_dataset()` 会优先读取 `paths.dataset_file`，并在转换前校验每例
+image/mask 的 shape 与 affine。`dataset.yaml` 当前使用 `layout: case_dir_pair`
+自动扫描 `dataset/<case_id>/image.nii.gz` 与 `mask.nii.gz`。代码仍兼容显式
+`cases:` 清单，用于数据尚未规范化、需要逐例指定路径的阶段。
+
+## 当前划分
+
+由 `configs/data/split_seed42.yaml` 生成，当前 13 例划分为 train=9、val=2、test=2。
+
+| split | cases |
+|---|---|
+| train | `H1_20Layer`, `H2_4Layer`, `S_1`, `S_4`, `S_5`, `nose_layer12`, `nose_layer20`, `nose_layer28`, `nose_layer36` |
+| val | `1_23_XY`, `nose_layer4` |
+| test | `2_25_XY`, `S_3` |
+
+nnU-Net 的 `numTraining` 为 11，即 train + val；test mask 同步输出到 `labelsTs` 用于独立评估。
+
+## processed 验证结果
+
+已重新生成：
+
+```powershell
+uv run imgseg-nnunet --config configs/nnunet_v2/base.yaml prepare
+```
+
+输出结构：
+
+```text
+dataset/processed/nnunet_raw/Dataset501_ImgSeg/
+  dataset.json
+  img_seg_split.json
+  imagesTr/<case_id>_0000.nii.gz
+  labelsTr/<case_id>.nii.gz
+  imagesTs/<case_id>_0000.nii.gz
+  labelsTs/<case_id>.nii.gz
+
+dataset/processed/nnunet_preprocessed/Dataset501_ImgSeg/
+  splits_final.json
+```
+
+验证命令：
+
+```powershell
+uv run python utils/audit_nifti.py dataset\processed\nnunet_raw\Dataset501_ImgSeg --labels
+```
+
+验证结果：
+
+- `dataset/processed/nnunet_raw/Dataset501_ImgSeg` 已生成 13 个 image 和 13 个 label。
+- 所有 processed label 均为 `uint8`。
+- 所有 processed label 的标签集合均为 `0,1`。
+- `2_25_XY` processed test label 前景比例为 40.9696%，与当前规范原始 mask 一致。
+- `S_1` processed train label 前景比例为 44.4292%，与当前规范原始 mask 一致。
+
+## 维护建议
+
+- 后续新增样本直接按 `dataset/<case_id>/image.nii.gz` 与 `mask.nii.gz` 放置，不需要修改 `dataset.yaml`。
+- 不要手工把同一 case 的多个版本放回主数据目录；需要保留历史版本时放在数据集目录之外或单独备份。
+- 合并前重新运行 `uv run imgseg-nnunet --config configs/nnunet_v2/base.yaml prepare` 和相关 smoke test。
