@@ -12,7 +12,7 @@ import yaml
 from img_seg.config import resolve_project_path
 
 NIFTI_SUFFIXES = (".nii", ".nii.gz")
-DEFAULT_IGNORED_DIRS = frozenset({"processed", "splits", "_standardizing_tmp"})
+DEFAULT_IGNORED_DIRS = {"processed", "splits", "_standardizing_tmp"}
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ class SegmentationCase:
 
 
 def is_nifti(path: Path) -> bool:
-    return path.name.endswith(NIFTI_SUFFIXES)
+    return path.name.lower().endswith(NIFTI_SUFFIXES)
 
 
 def is_mask_file(path: Path) -> bool:
@@ -100,7 +100,12 @@ def discover_cases(
     require_masks: bool = True,
     recursive: bool = False,
 ) -> list[SegmentationCase]:
-    """Discover one image and one optional mask per immediate dataset child directory."""
+    """Discover one image and one optional mask per dataset case directory.
+
+    By default this scans immediate child directories only. Set ``recursive`` to
+    search nested files inside each case, and use overrides to select a specific
+    image or mask when a case contains multiple candidates.
+    """
 
     dataset_dir = Path(dataset_dir)
     image_overrides = image_overrides or {}
@@ -217,7 +222,14 @@ def _excluded_dirs(manifest: dict[str, Any]) -> set[str]:
     return excluded
 
 
+def _validate_mask_policy(manifest: dict[str, Any]) -> None:
+    policy = manifest.get("mask_policy")
+    if policy is not None and policy != "nonzero_to_one":
+        raise ValueError(f"Unsupported mask_policy: {policy}")
+
+
 def _load_case_dir_pairs(manifest: dict[str, Any], root: Path) -> list[SegmentationCase]:
+    _validate_mask_policy(manifest)
     image_name = str(manifest.get("image_name", "image.nii.gz"))
     mask_name = str(manifest.get("mask_name", "mask.nii.gz"))
     case_id_policy = str(manifest.get("case_id_policy", "directory_name"))

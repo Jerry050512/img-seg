@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import shutil
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -85,7 +86,10 @@ def save_binary_mask(nib: Any, src: Path, dst: Path) -> None:
     header = image.header.copy()
     header.set_data_dtype(np.uint8)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    nib.save(nib.Nifti1Image(data, image.affine, header=header), str(dst))
+    output = nib.Nifti1Image(data, image.affine, header=header)
+    output.set_qform(image.get_qform(), int(image.header["qform_code"]))
+    output.set_sform(image.get_sform(), int(image.header["sform_code"]))
+    nib.save(output, str(dst))
 
 
 def validate_pair(nib: Any, case: RawCase) -> None:
@@ -151,13 +155,13 @@ def main() -> None:
     parser.add_argument(
         "--backup-root",
         type=Path,
-        default=Path("C:/tmp"),
+        default=Path(tempfile.gettempdir()),
         help="Directory where old raw folders are moved.",
     )
     parser.add_argument(
         "--temp-root",
         type=Path,
-        default=Path("C:/tmp"),
+        default=Path(tempfile.gettempdir()),
         help="Directory where temporary standardized files are built.",
     )
     parser.add_argument("--apply", action="store_true", help="Move standardized data into place.")
