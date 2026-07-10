@@ -93,6 +93,36 @@ def test_list_checkpoints_prefers_final_then_best(tmp_path: Path) -> None:
     ]
 
 
+def test_list_efficientnet_checkpoints_uses_pth_and_prefers_configured_best(
+    tmp_path: Path,
+) -> None:
+    checkpoint_dir = tmp_path / "efficientnet"
+    checkpoint_dir.mkdir()
+    (checkpoint_dir / "best.pth").write_bytes(b"best")
+    (checkpoint_dir / "epoch_10.pth").write_bytes(b"epoch")
+    (checkpoint_dir / "legacy.pt").write_bytes(b"legacy")
+    config_path = tmp_path / "efficientnet.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "model_key": "efficientnet_b0",
+                "checkpoints": {
+                    "output_dir": str(checkpoint_dir),
+                    "best": str(checkpoint_dir / "best.pth"),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    checkpoints = list_checkpoints(model_key="efficientnet_b0", config_path=config_path)
+
+    assert [checkpoint.checkpoint_name for checkpoint in checkpoints] == [
+        "best.pth",
+        "epoch_10.pth",
+    ]
+
+
 def test_prepare_checkpoint_name_rejects_non_checkpoint_file(tmp_path: Path) -> None:
     bad_checkpoint = tmp_path / "checkpoint.txt"
     bad_checkpoint.write_text("not a checkpoint", encoding="utf-8")
@@ -159,7 +189,7 @@ def test_run_batch_inference_routes_efficientnet_nifti_and_png(
     write_nifti(nifti_path, np.ones((4, 5, 2), dtype=np.float32))
     write_png(png_path, np.ones((6, 7), dtype=np.uint8) * 128)
     inputs = collect_inputs(uploaded_files=[nifti_path, png_path])
-    checkpoint_path = tmp_path / "best.pt"
+    checkpoint_path = tmp_path / "best.pth"
     checkpoint_path.write_bytes(b"fake checkpoint")
     config_path = tmp_path / "efficientnet.yaml"
     calls: list[tuple[str, Path]] = []

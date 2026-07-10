@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import cv2
@@ -10,9 +11,14 @@ import torch
 
 from img_seg.data.cases import discover_cases
 from img_seg.data.slices import NiftiSliceDataset, build_slice_samples
-from img_seg.data.splits import make_case_split
+from img_seg.data.splits import CaseSplit, make_case_split
 from img_seg.models.efficientnet_b0 import EfficientNetB0Segmenter
-from img_seg.training.efficientnet_b0_cli import build_parser, evaluate_slice_loader
+from img_seg.training import efficientnet_b0_cli
+from img_seg.training.efficientnet_b0_cli import (
+    build_parser,
+    evaluate_slice_loader,
+    resolve_training_artifacts,
+)
 
 
 def write_nifti(path: Path, data: np.ndarray, *, affine: np.ndarray | None = None) -> None:
@@ -73,7 +79,7 @@ def test_slice_samples_preserve_case_split_and_binarize_masks(tmp_path: Path) ->
 def test_efficientnet_segmenter_predicts_nifti_and_image(tmp_path: Path) -> None:
     config = tiny_config()
     segmenter = EfficientNetB0Segmenter(config, device="cpu")
-    checkpoint_path = tmp_path / "best.pt"
+    checkpoint_path = tmp_path / "best.pth"
     torch.save({"model_state_dict": segmenter.model.state_dict()}, checkpoint_path)
 
     loaded = EfficientNetB0Segmenter(config, device="cpu")
@@ -149,7 +155,7 @@ def test_efficientnet_rejects_checkpoint_with_incompatible_preprocessing(
     segmenter = EfficientNetB0Segmenter(config, device="cpu")
     saved_config = tiny_config()
     saved_config["data"]["image_size"] = [32, 32]
-    checkpoint_path = tmp_path / "incompatible.pt"
+    checkpoint_path = tmp_path / "incompatible.pth"
     torch.save(
         {
             "model_state_dict": segmenter.model.state_dict(),
@@ -246,11 +252,97 @@ def test_evaluate_slice_loader_aggregates_confusion_by_case() -> None:
     )
 
 
+def test_training_writes_pth_checkpoint_and_jsonl_log(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = tiny_config()
+    config["training"] = {
+        "seed": 42,
+        "batch_size": 1,
+        "optimizer": "adamw",
+        "learning_rate": 0.001,
+        "weight_decay": 0.0,
+        "loss": "dice_bce",
+        "amp": False,
+    }
+    config["runtime"].update({"num_workers": 0, "nifti_cache_size": 0})
+    config["checkpoints"] = {"best": str(tmp_path / "configured" / "best.pth")}
+
+    sample = {
+        "image": torch.zeros((1, 4, 4), dtype=torch.float32),
+        "mask": torch.ones((1, 4, 4), dtype=torch.float32),
+        "case_id": "case_a",
+    }
+
+    class FakeSegmenter:
+        def __init__(self, _config: dict, *, use_pretrained_encoder: bool) -> None:
+            assert use_pretrained_encoder is True
+            self.device = torch.device("cpu")
+            self.model = torch.nn.Conv2d(1, 1, kernel_size=1)
+            self.encoder_initialization = "test"
+
+    monkeypatch.setattr(efficientnet_b0_cli, "load_efficientnet_config", lambda _path: config)
+    monkeypatch.setattr(
+        efficientnet_b0_cli,
+        "split_cases_from_config",
+        lambda _config: ([], CaseSplit(train=["case_a"], val=["case_b"], test=[])),
+    )
+    monkeypatch.setattr(
+        efficientnet_b0_cli,
+        "dataset_for_split",
+        lambda *_args, **_kwargs: [sample],
+    )
+    monkeypatch.setattr(efficientnet_b0_cli, "EfficientNetB0Segmenter", FakeSegmenter)
+    monkeypatch.setattr(
+        efficientnet_b0_cli,
+        "evaluate_slice_loader",
+        lambda *_args, **_kwargs: {
+            "dice": 0.75,
+            "iou": 0.6,
+            "precision": 0.8,
+            "recall": 0.7,
+        },
+    )
+
+    result = efficientnet_b0_cli.train_model(
+        tmp_path / "config.yaml",
+        epochs=1,
+        output_dir=tmp_path / "run",
+    )
+
+    checkpoint_path = Path(result["checkpoint"])
+    log_path = Path(result["log_file"])
+    records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+
+    assert checkpoint_path.name == "best.pth"
+    assert checkpoint_path.exists()
+    assert log_path.name == "train.log"
+    assert [record["event"] for record in records] == [
+        "run_started",
+        "epoch_completed",
+        "checkpoint_saved",
+        "run_completed",
+    ]
+    assert {record["run_id"] for record in records} == {result["run_id"]}
+    assert records[1]["dice"] == pytest.approx(0.75)
+
+
+def test_training_rejects_non_pth_checkpoint_path(tmp_path: Path) -> None:
+    config = {"checkpoints": {"best": str(tmp_path / "best.pt")}}
+
+    with pytest.raises(ValueError, match=r"\.pth suffix"):
+        resolve_training_artifacts(config)
+
+
 def test_efficientnet_parser_accepts_config_before_or_after_subcommand() -> None:
     parser = build_parser()
 
     before = parser.parse_args(["--config", "before.yaml", "train"])
-    after = parser.parse_args(["train", "--config", "after.yaml"])
+    after = parser.parse_args(
+        ["train", "--config", "after.yaml", "--log-file", "custom.log"]
+    )
 
     assert (before.command_config or before.config) == "before.yaml"
     assert (after.command_config or after.config) == "after.yaml"
+    assert after.log_file == "custom.log"

@@ -6,8 +6,11 @@ import argparse
 import json
 import random
 from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import numpy as np
 import torch
@@ -24,6 +27,34 @@ from img_seg.models.efficientnet_b0 import (
     EfficientNetB0Segmenter,
     load_efficientnet_config,
 )
+
+DEFAULT_CHECKPOINT_NAME = "best.pth"
+DEFAULT_TRAIN_LOG_NAME = "train.log"
+
+
+@dataclass(frozen=True)
+class TrainingArtifacts:
+    checkpoint: Path
+    log_file: Path
+
+
+@dataclass(frozen=True)
+class TrainingLog:
+    path: Path
+    run_id: str = field(default_factory=lambda: uuid4().hex)
+
+    def write(self, event: str, **values: object) -> None:
+        """Append one self-contained JSON record and flush it to disk."""
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "run_id": self.run_id,
+            "event": event,
+            **values,
+        }
+        with self.path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def split_cases_from_config(config: dict[str, Any]) -> tuple[list[SegmentationCase], CaseSplit]:
@@ -135,10 +166,69 @@ def evaluate_slice_loader(
     }
 
 
-def checkpoint_output_path(config: dict[str, Any], output_dir: str | Path | None = None) -> Path:
+def resolve_training_artifacts(
+    config: dict[str, Any],
+    *,
+    output_dir: str | Path | None = None,
+    log_file: str | Path | None = None,
+) -> TrainingArtifacts:
     if output_dir is not None:
-        return resolve_project_path(output_dir) / "best.pt"
-    return project_path_from_config(config, "checkpoints.best")
+        artifact_dir = resolve_project_path(output_dir)
+        checkpoint_path = artifact_dir / DEFAULT_CHECKPOINT_NAME
+        default_log_path = artifact_dir / DEFAULT_TRAIN_LOG_NAME
+    else:
+        checkpoint_path = project_path_from_config(config, "checkpoints.best")
+        default_log_path = resolve_project_path(
+            deep_get(config, "training.log_file", "outputs/efficientnet_b0/train.log")
+        )
+
+    if checkpoint_path.suffix.lower() != ".pth":
+        raise ValueError(f"EfficientNet-B0 checkpoint must use the .pth suffix: {checkpoint_path}")
+
+    return TrainingArtifacts(
+        checkpoint=checkpoint_path,
+        log_file=resolve_project_path(log_file) if log_file is not None else default_log_path,
+    )
+
+
+def _train_one_epoch(
+    model: torch.nn.Module,
+    loader: DataLoader[dict[str, object]],
+    optimizer: torch.optim.Optimizer,
+    scaler: torch.amp.GradScaler,
+    *,
+    device: torch.device,
+    use_amp: bool,
+) -> float:
+    model.train()
+    losses = []
+    non_blocking = device.type == "cuda"
+    for batch in loader:
+        images = batch["image"].to(device, non_blocking=non_blocking)
+        masks = batch["mask"].to(device, non_blocking=non_blocking)
+        optimizer.zero_grad(set_to_none=True)
+        with torch.amp.autocast("cuda", enabled=use_amp):
+            loss = dice_bce_loss(model(images), masks)
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
+        losses.append(float(loss.detach().cpu()))
+
+    if not losses:
+        raise ValueError("No training batches were produced")
+    return float(np.mean(losses))
+
+
+def _save_checkpoint(payload: dict[str, Any], path: Path) -> None:
+    """Atomically replace the best checkpoint to avoid leaving a partial file."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_name(f".{path.name}.tmp")
+    try:
+        torch.save(payload, temporary_path)
+        temporary_path.replace(path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def train_model(
@@ -146,6 +236,7 @@ def train_model(
     *,
     epochs: int | None = None,
     output_dir: str | Path | None = None,
+    log_file: str | Path | None = None,
 ) -> dict[str, Any]:
     config = load_efficientnet_config(config_path)
     seed = int(deep_get(config, "training.seed", 42))
@@ -206,26 +297,31 @@ def train_model(
     use_amp = bool(deep_get(config, "training.amp", True)) and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     best_dice = -1.0
-    best_path = checkpoint_output_path(config, output_dir)
-    best_path.parent.mkdir(parents=True, exist_ok=True)
+    artifacts = resolve_training_artifacts(config, output_dir=output_dir, log_file=log_file)
+    training_log = TrainingLog(artifacts.log_file)
+    training_log.write(
+        "run_started",
+        config=str(resolve_project_path(config_path)),
+        device=str(device),
+        epochs=epoch_count,
+        train_cases=len(split.train),
+        val_cases=len(split.val),
+        train_slices=len(train_dataset),
+        val_slices=len(val_dataset),
+        checkpoint=str(artifacts.checkpoint),
+        encoder_initialization=segmenter.encoder_initialization,
+    )
 
     history = []
     for epoch in range(1, epoch_count + 1):
-        model.train()
-        losses = []
-        for batch in train_loader:
-            images = batch["image"].to(device, non_blocking=pin_memory)
-            masks = batch["mask"].to(device, non_blocking=pin_memory)
-            optimizer.zero_grad(set_to_none=True)
-            autocast_device = "cuda" if device.type == "cuda" else "cpu"
-            with torch.amp.autocast(autocast_device, enabled=use_amp):
-                logits = model(images)
-                loss = dice_bce_loss(logits, masks)
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            losses.append(float(loss.detach().cpu()))
-
+        train_loss = _train_one_epoch(
+            model,
+            train_loader,
+            optimizer,
+            scaler,
+            device=device,
+            use_amp=use_amp,
+        )
         val_metrics = evaluate_slice_loader(
             model,
             val_loader,
@@ -233,13 +329,14 @@ def train_model(
             threshold=float(deep_get(config, "inference.threshold", 0.5)),
             use_amp=use_amp,
         )
-        train_loss = float(np.mean(losses)) if losses else 0.0
-        row = {"epoch": epoch, "train_loss": train_loss, **val_metrics}
+        is_best = val_metrics["dice"] > best_dice
+        row = {"epoch": epoch, "train_loss": train_loss, **val_metrics, "is_best": is_best}
         history.append(row)
+        training_log.write("epoch_completed", **row)
         print(json.dumps(row, ensure_ascii=False))
-        if val_metrics["dice"] > best_dice:
+        if is_best:
             best_dice = val_metrics["dice"]
-            torch.save(
+            _save_checkpoint(
                 {
                     "model_state_dict": model.state_dict(),
                     "config": config,
@@ -248,16 +345,30 @@ def train_model(
                     "validation": "case_macro_all_slices",
                     "encoder_initialization": segmenter.encoder_initialization,
                 },
-                best_path,
+                artifacts.checkpoint,
+            )
+            training_log.write(
+                "checkpoint_saved",
+                epoch=epoch,
+                best_val_dice=best_dice,
+                checkpoint=str(artifacts.checkpoint),
             )
 
-    return {
-        "checkpoint": str(best_path),
+    result = {
+        "checkpoint": str(artifacts.checkpoint),
+        "log_file": str(artifacts.log_file),
+        "run_id": training_log.run_id,
         "best_val_dice": best_dice,
         "epochs": epoch_count,
         "encoder_initialization": segmenter.encoder_initialization,
         "history": history,
     }
+    training_log.write(
+        "run_completed",
+        best_val_dice=best_dice,
+        checkpoint=str(artifacts.checkpoint),
+    )
+    return result
 
 
 def _case_ids_for_split(split: CaseSplit, split_name: str) -> list[str]:
@@ -318,6 +429,7 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--config", dest="command_config")
     train_parser.add_argument("--epochs", type=int)
     train_parser.add_argument("--output-dir")
+    train_parser.add_argument("--log-file")
 
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate checkpoint on a case split.")
     eval_parser.add_argument("--config", dest="command_config")
@@ -332,7 +444,12 @@ def main() -> None:
     args = build_parser().parse_args()
     config_path = args.command_config or args.config
     if args.command == "train":
-        result = train_model(config_path, epochs=args.epochs, output_dir=args.output_dir)
+        result = train_model(
+            config_path,
+            epochs=args.epochs,
+            output_dir=args.output_dir,
+            log_file=args.log_file,
+        )
     elif args.command == "evaluate":
         result = evaluate_model(
             config_path,

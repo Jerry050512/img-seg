@@ -77,11 +77,7 @@ def _build_smp_model(
         if encoder_weights is None:
             raise
         kwargs["encoder_weights"] = None
-        try:
-            model = constructor(**kwargs)
-        except Exception:
-            # If construction also fails without weights, surface the real model/config error.
-            raise
+        model = constructor(**kwargs)
         warnings.warn(
             "Could not initialize pretrained encoder weights; falling back to random "
             f"initialization ({type(pretrained_error).__name__}: {pretrained_error}).",
@@ -139,13 +135,9 @@ def _validate_checkpoint_config(
 
 
 def _case_id_from_nifti(path: Path) -> str:
-    name = path.name
-    if name.endswith(".nii.gz"):
-        stem = name.removesuffix(".nii.gz")
-        return stem.removesuffix("_0000")
-    if name.endswith(".nii"):
-        stem = name.removesuffix(".nii")
-        return stem.removesuffix("_0000")
+    for suffix in (".nii.gz", ".nii"):
+        if path.name.endswith(suffix):
+            return path.name.removesuffix(suffix).removesuffix("_0000")
     return path.stem
 
 

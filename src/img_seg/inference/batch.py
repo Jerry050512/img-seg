@@ -276,9 +276,9 @@ def list_checkpoints(
         checkpoint_dir = resolve_project_path(
             deep_get(efficientnet_config, "checkpoints.output_dir", "checkpoints/efficientnet_b0")
         )
-        checkpoints = list(checkpoint_dir.glob("*.pt"))
+        checkpoints = list(checkpoint_dir.glob("*.pth"))
         configured_best = resolve_project_path(
-            deep_get(efficientnet_config, "checkpoints.best", checkpoint_dir / "best.pt")
+            deep_get(efficientnet_config, "checkpoints.best", checkpoint_dir / "best.pth")
         )
 
         def efficientnet_priority(path: Path) -> tuple[int, str]:
