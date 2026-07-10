@@ -72,6 +72,16 @@ uv run imgseg-efficientnet evaluate `
 
 评估会逐 case 重建完整 NIfTI 二值 mask，保留参考影像的 affine/header，并使用公共 Dice、IoU、Precision、Recall 指标计算每例结果及宏平均，同时记录整例推理耗时。
 
+## 正式实验结果（2026-07-10）
+
+在带 NVIDIA GPU 的 PC 上使用默认配置完成 100 轮训练，ImageNet encoder 初始化成功。`best.pt` 保存于第 3 轮，对应验证集宏平均 Dice 0.7916。随后使用上述评估命令在 `split_seed42` test split 的 2 个 case 上得到：
+
+| Dice | IoU | Precision | Recall | 端到端 sec/case |
+|---:|---:|---:|---:|---:|
+| 0.9065 | 0.8313 | 0.9281 | 0.8878 | 11.16 |
+
+这里的测试指标和耗时均为 case 宏平均。端到端耗时包含 NIfTI 读取、整卷 slice batching 推理和 mask 保存，不包含后续指标计算。逐 case 结果、训练曲线口径和实验结论见 `docs/EXPERIMENTS.md`；原始本地记录为 `outputs/efficientnet_b0/log.json` 和 `outputs/efficientnet_b0/metrics.json`。
+
 ## 批量推理
 
 ```powershell
@@ -100,7 +110,9 @@ uv run imgseg-webui
 
 ## 当前限制与实验状态
 
-- 本轮是工程链路优化，没有运行新的 GPU 训练或正式评估，因而没有新增 EfficientNet-B0 checkpoint 或指标，也不据此宣称精度提升。slice batching、AMP 和 proxy cache 的速度收益需要在相同硬件、输入和 checkpoint 下实测。
+- 已完成一次 NVIDIA GPU 正式训练与 test split 评估，生成的 checkpoint 为 `checkpoints/efficientnet_b0/best.pt`。该路径仅是本地交付命名；文件不随 Git 分发，仍需上传外部存储后才能交付给其他负责人。
+- 当前测试集只有 2 个 case，且两例 Dice 分别为 0.8674 和 0.9456；宏平均结果用于固定划分下的项目基线，不代表已充分验证跨数据泛化能力。
+- 最佳验证 Dice 出现在第 3 轮，而训练完成到第 100 轮，后续实验应考虑 early stopping，并验证数据增强或正则化是否能缩小训练与验证趋势差异。
 - 默认 `model.encoder_weights: imagenet`。训练初始化若无法取得预训练权重，会发出警告并回退到随机初始化；这会改变训练起点，必须在实验记录中说明。
 - 该模型按 2D slice 建模，缺少显式 3D 上下文；边界连续性与泛化能力需要通过正式验证/测试确认。
-- 没有 CUDA 时仍可运行 CPU/MPS smoke test，但 AMP 会自动关闭；正式指标应在 GPU 机器完成训练后补入 `docs/EXPERIMENTS.md`。
+- 没有 CUDA 时仍可运行 CPU/MPS smoke test，但 AMP 会自动关闭；不同硬件上的耗时不可与本次 NVIDIA GPU PC 结果直接比较。

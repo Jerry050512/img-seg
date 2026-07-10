@@ -6,11 +6,19 @@
 |---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|
 | 2026-07-08 | Codex | nnU-Net v2 2d fold0 | `split_seed42` | nnU-Net 2D patches | Dice+CE | 8 complete, aborted at epoch 8 | 0.7734 | 0.9301 | 0.9487 | 0.9793 | 60.5 | `checkpoints/nnunet_v2/Dataset501_ImgSeg/nnUNetTrainer__nnUNetPlans__2d/fold_0/checkpoint_best.pth` | Preliminary test result from `checkpoint_best.pth`; training stopped due Windows shared-memory worker failure. Reports: `outputs/reports/nnunet_v2_2d_fold0`; prediction overlay: `outputs/visualizations/nnunet_v2_2d_fold0/H1-20Layer_prediction_overlay.png`. |
 | 2026-07-09 | Codex | nnU-Net v2 2d fold0 200 epochs | `split_seed42` | nnU-Net 2D patches | Dice+CE | 200 complete | 0.7981 | 0.9514 | 0.9779 | 0.9723 | 58.8 | `checkpoints/nnunet_v2/Dataset501_ImgSeg/nnUNetTrainer_200epochs__nnUNetPlans__2d/fold_0/checkpoint_final.pth` | Final checkpoint selected: test Dice 0.9751 on `H1-20Layer`; `checkpoint_best.pth` test Dice 0.9751, IoU 0.9513, precision 0.9744, recall 0.9757. Reports: `outputs/reports/nnunet_v2_2d_fold0_200epochs`; final predictions: `outputs/nnunet_v2_2d_fold0_200epochs_final`; overlay: `outputs/visualizations/nnunet_v2_2d_fold0_200epochs/H1-20Layer_final_overlay.png`. |
+| 2026-07-10 | NH5 | 2D U-Net + EfficientNet-B0 encoder | `split_seed42` test | z-axis 2D slices, resized to 512×512 | Dice+BCE | 100 complete | 0.7916 | 0.8313 | 0.9281 | 0.8878 | 11.2 | `checkpoints/efficientnet_b0/best.pt` | Best validation Dice was reached at epoch 3 with ImageNet encoder initialization. Test macro Dice was 0.9065 over 2 cases on an NVIDIA GPU PC. End-to-end prediction time includes NIfTI read, inference, and mask save. Raw local records: `outputs/efficientnet_b0/log.json` and `outputs/efficientnet_b0/metrics.json`. |
 
-WebUI-only changes do not add experiment rows unless they run a new model evaluation.
 
-## 2026-07-10 EfficientNet-B0 工程优化说明
+## 2026-07-10 EfficientNet-B0 正式训练与测试
 
-本轮接入共享批量推理与 WebUI 模型选择，并实现整卷 slice batching、CUDA 推理 AMP、验证集全 slice 的 case-level 聚合，以及有界 NIfTI proxy cache；同时补齐 `--config` 参数顺序兼容和 BMP/TIFF 输入支持。
+在带 NVIDIA GPU 的 PC 上使用 `configs/efficientnet_b0/base.yaml` 完成 100 轮训练，并使用保存的 `checkpoints/efficientnet_b0/best.pt` 在 `split_seed42` 的 test split 上正式评估。训练使用 ImageNet encoder 初始化；最佳验证 Dice 为 0.7916，出现在第 3 轮。
 
-本轮没有运行新的 GPU 训练或正式模型评估，没有产生可交付的 EfficientNet-B0 checkpoint，也没有新增可报告的 Dice、IoU、Precision、Recall 或推理耗时。上述改动不构成精度提升或加速结论，因此不在实验表中添加占位结果。取得外部提供的兼容 checkpoint 后，应在固定 split 和硬件上重新评估，并把权重位置、配置、指标与耗时追加到上表。
+测试集包含 2 个 case，以下指标均为 case 宏平均；耗时为 `predict_volume` 记录的端到端时间，包含 NIfTI 读取、整卷 slice batching 推理和结果保存，不包含后续指标计算。
+
+| case | volume shape | Dice | IoU | Precision | Recall | infer sec |
+|---|---:|---:|---:|---:|---:|---:|
+| `2_25_XY` | 973×973×298 | 0.8674 | 0.7658 | 0.9195 | 0.8208 | 16.25 |
+| `S-4` | 512×512×331 | 0.9456 | 0.8968 | 0.9367 | 0.9547 | 6.06 |
+| **macro average** | — | **0.9065** | **0.8313** | **0.9281** | **0.8878** | **11.16** |
+
+训练 loss 继续下降时，验证 Dice 在第 3 轮后未再超过 0.7916，说明当前配置很早进入验证性能平台期，并存在过拟合可能；后续可加入 early stopping，并在固定 split 上验证数据增强或正则化调整。两个测试 case 的 Dice 相差约 0.0782，且测试集规模很小，因此当前 0.9065 的宏平均结果应视为本项目固定划分上的基线，不宜直接外推为稳定泛化性能。
