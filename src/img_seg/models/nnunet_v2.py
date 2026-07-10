@@ -253,6 +253,13 @@ def predict(
     configuration: str,
     folds: str = "0",
     checkpoint_name: str | None = None,
+    device: str | None = None,
+    disable_tta: bool = False,
+    not_on_device: bool = False,
+    num_processes_preprocessing: int | None = None,
+    num_processes_segmentation_export: int | None = None,
+    num_parts: int = 1,
+    part_id: int = 0,
     dry_run: bool = False,
 ) -> None:
     config = load_nnunet_config(config_path)
@@ -280,6 +287,18 @@ def predict(
     ]
     if checkpoint_name:
         command.extend(["-chk", checkpoint_name])
+    if device:
+        command.extend(["-device", device])
+    if disable_tta:
+        command.append("--disable_tta")
+    if not_on_device:
+        command.append("--not_on_device")
+    if num_processes_preprocessing is not None:
+        command.extend(["-npp", str(num_processes_preprocessing)])
+    if num_processes_segmentation_export is not None:
+        command.extend(["-nps", str(num_processes_segmentation_export)])
+    if num_parts != 1 or part_id != 0:
+        command.extend(["-num_parts", str(num_parts), "-part_id", str(part_id)])
     run_command(command, env=paths.env(deep_get(config, "runtime", {})), dry_run=dry_run)
 
 
