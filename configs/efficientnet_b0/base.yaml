@@ -4,6 +4,7 @@ task:
   type: binary_segmentation
   input_format: 2d_slices
 data:
+  dataset_config: configs/data/dataset.yaml
   split_file: configs/data/split_seed42.yaml
   slice_axis: z
   image_size: [512, 512]

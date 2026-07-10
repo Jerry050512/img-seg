@@ -4,8 +4,8 @@
 
 ## 当前状态
 
-- 原始数据位于 `dataset/`，每个子目录是一例扫描样本。
-- 现有 mask 多数为 `.nii`，建议交付前统一压缩为 `.nii.gz` 以节省空间。
+- 原始数据位于 `dataset/`，读取布局规则位于 `configs/data/dataset.yaml`。
+- 原始样本目录已规范为 `dataset/<case_id>/image.nii.gz` 与 `mask.nii.gz`。
 - 项目环境使用 `uv` 管理，依赖声明在 `pyproject.toml`。
 - 固定对比三个模型：`nnU-Net v2`、`MONAI SegResNet`、`EfficientNet-B0 encoder` 的 2D 轻量分割模型。
 
@@ -57,6 +57,7 @@ uv sync
 
 ```powershell
 uv run python utils/audit_nifti.py dataset --labels
+uv run imgseg-nnunet --config configs/nnunet_v2/base.yaml prepare
 uv run python utils/compress_nii.py dataset --recursive
 ```
 
