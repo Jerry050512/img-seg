@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +18,7 @@ from img_seg.config import deep_get, load_yaml, project_path_from_config, resolv
 from img_seg.data.cases import SegmentationCase, discover_cases
 from img_seg.data.slices import NiftiSliceDataset, build_slice_samples
 from img_seg.data.splits import CaseSplit, make_case_split
-from img_seg.evaluation.metrics import binary_metrics
+from img_seg.evaluation.metrics import binary_confusion, binary_metrics, safe_divide
 from img_seg.io.nifti import binarize_mask, load_nifti_array
 from img_seg.models.efficientnet_b0 import (
     EfficientNetB0Segmenter,
@@ -32,6 +34,9 @@ def split_cases_from_config(config: dict[str, Any]) -> tuple[list[SegmentationCa
         require_masks=True,
     )
     split_config = load_yaml(project_path_from_config(config, "data.split_file"))
+    strategy = str(split_config.get("strategy", "case_level"))
+    if strategy != "case_level":
+        raise ValueError(f"Unsupported split strategy: {strategy}")
     ratios = split_config.get("ratios", {})
     split = make_case_split(
         [case.case_id for case in cases],
@@ -47,18 +52,28 @@ def dataset_for_split(
     config: dict[str, Any],
     cases: list[SegmentationCase],
     case_ids: list[str],
+    *,
+    training: bool,
 ) -> NiftiSliceDataset:
+    foreground_keep_ratio = (
+        float(deep_get(config, "data.foreground_slice_keep_ratio", 1.0)) if training else 1.0
+    )
+    empty_keep_ratio = (
+        float(deep_get(config, "data.empty_slice_keep_ratio", 0.25)) if training else 1.0
+    )
     samples = build_slice_samples(
         cases,
         case_ids,
         slice_axis=deep_get(config, "data.slice_axis", "z"),
-        foreground_slice_keep_ratio=float(
-            deep_get(config, "data.foreground_slice_keep_ratio", 1.0)
-        ),
-        empty_slice_keep_ratio=float(deep_get(config, "data.empty_slice_keep_ratio", 0.25)),
+        foreground_slice_keep_ratio=foreground_keep_ratio,
+        empty_slice_keep_ratio=empty_keep_ratio,
         seed=int(deep_get(config, "training.seed", 42)),
     )
-    return NiftiSliceDataset(samples, image_size=deep_get(config, "data.image_size", [512, 512]))
+    return NiftiSliceDataset(
+        samples,
+        image_size=deep_get(config, "data.image_size", [512, 512]),
+        nifti_cache_size=int(deep_get(config, "runtime.nifti_cache_size", 8)),
+    )
 
 
 def dice_bce_loss(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
@@ -77,20 +92,43 @@ def evaluate_slice_loader(
     *,
     device: torch.device,
     threshold: float,
+    use_amp: bool = False,
 ) -> dict[str, float]:
-    rows = []
+    counts_by_case: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0, 0])
     model.eval()
-    with torch.no_grad():
+    with torch.inference_mode():
         for batch in loader:
-            images = batch["image"].to(device)
-            masks = batch["mask"].to(device)
-            logits = model(images)
+            non_blocking = device.type == "cuda"
+            images = batch["image"].to(device, non_blocking=non_blocking)
+            masks = batch["mask"].to(device, non_blocking=non_blocking)
+            with torch.amp.autocast("cuda", enabled=use_amp and device.type == "cuda"):
+                logits = model(images)
             predictions = (torch.sigmoid(logits) >= threshold).detach().cpu().numpy()
             targets = (masks >= 0.5).detach().cpu().numpy()
-            for prediction, target in zip(predictions, targets, strict=True):
-                rows.append(binary_metrics(prediction[0], target[0]).as_dict())
-    if not rows:
-        raise ValueError("No validation rows were produced")
+            case_ids = batch["case_id"]
+            for prediction, target, case_id in zip(
+                predictions,
+                targets,
+                case_ids,
+                strict=True,
+            ):
+                counts = binary_confusion(prediction[0], target[0])
+                totals = counts_by_case[str(case_id)]
+                for index, value in enumerate(counts):
+                    totals[index] += value
+    if not counts_by_case:
+        raise ValueError("No validation cases were produced")
+
+    rows = []
+    for tp, fp, fn, _tn in counts_by_case.values():
+        rows.append(
+            {
+                "dice": safe_divide(2 * tp, 2 * tp + fp + fn),
+                "iou": safe_divide(tp, tp + fp + fn),
+                "precision": safe_divide(tp, tp + fp),
+                "recall": safe_divide(tp, tp + fn),
+            }
+        )
     return {
         key: float(np.mean([row[key] for row in rows]))
         for key in ("dice", "iou", "precision", "recall")
@@ -110,34 +148,61 @@ def train_model(
     output_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     config = load_efficientnet_config(config_path)
-    torch.manual_seed(int(deep_get(config, "training.seed", 42)))
+    seed = int(deep_get(config, "training.seed", 42))
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+    optimizer_name = str(deep_get(config, "training.optimizer", "adamw")).lower()
+    if optimizer_name != "adamw":
+        raise ValueError(f"Unsupported training.optimizer: {optimizer_name}")
+    loss_name = str(deep_get(config, "training.loss", "dice_bce")).lower()
+    if loss_name != "dice_bce":
+        raise ValueError(f"Unsupported training.loss: {loss_name}")
+
     cases, split = split_cases_from_config(config)
-    train_dataset = dataset_for_split(config, cases, split.train)
-    val_dataset = dataset_for_split(config, cases, split.val)
+    train_dataset = dataset_for_split(config, cases, split.train, training=True)
+    val_dataset = dataset_for_split(config, cases, split.val, training=False)
 
     batch_size = int(deep_get(config, "training.batch_size", 8))
+    if batch_size <= 0:
+        raise ValueError(f"training.batch_size must be positive: {batch_size}")
     num_workers = int(deep_get(config, "runtime.num_workers", 0))
+    if num_workers < 0:
+        raise ValueError(f"runtime.num_workers cannot be negative: {num_workers}")
+    segmenter = EfficientNetB0Segmenter(config, use_pretrained_encoder=True)
+    device = segmenter.device
+    model = segmenter.model
+    pin_memory = device.type == "cuda"
+    loader_options = {
+        "batch_size": batch_size,
+        "num_workers": num_workers,
+        "pin_memory": pin_memory,
+        "persistent_workers": num_workers > 0,
+    }
+    train_generator = torch.Generator().manual_seed(seed)
     train_loader = DataLoader(
         train_dataset,
-        batch_size=batch_size,
         shuffle=True,
-        num_workers=num_workers,
+        generator=train_generator,
+        **loader_options,
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers,
+        **loader_options,
     )
 
-    segmenter = EfficientNetB0Segmenter(config)
-    device = segmenter.device
-    model = segmenter.model
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=float(deep_get(config, "training.learning_rate", 0.0003)),
+        weight_decay=float(deep_get(config, "training.weight_decay", 0.01)),
     )
-    epoch_count = int(epochs or deep_get(config, "training.epochs", 100))
+    epoch_count = int(deep_get(config, "training.epochs", 100) if epochs is None else epochs)
+    if epoch_count <= 0:
+        raise ValueError(f"training.epochs must be positive: {epoch_count}")
     use_amp = bool(deep_get(config, "training.amp", True)) and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     best_dice = -1.0
@@ -149,8 +214,8 @@ def train_model(
         model.train()
         losses = []
         for batch in train_loader:
-            images = batch["image"].to(device)
-            masks = batch["mask"].to(device)
+            images = batch["image"].to(device, non_blocking=pin_memory)
+            masks = batch["mask"].to(device, non_blocking=pin_memory)
             optimizer.zero_grad(set_to_none=True)
             autocast_device = "cuda" if device.type == "cuda" else "cpu"
             with torch.amp.autocast(autocast_device, enabled=use_amp):
@@ -166,6 +231,7 @@ def train_model(
             val_loader,
             device=device,
             threshold=float(deep_get(config, "inference.threshold", 0.5)),
+            use_amp=use_amp,
         )
         train_loss = float(np.mean(losses)) if losses else 0.0
         row = {"epoch": epoch, "train_loss": train_loss, **val_metrics}
@@ -179,6 +245,8 @@ def train_model(
                     "config": config,
                     "epoch": epoch,
                     "best_val_dice": best_dice,
+                    "validation": "case_macro_all_slices",
+                    "encoder_initialization": segmenter.encoder_initialization,
                 },
                 best_path,
             )
@@ -187,6 +255,7 @@ def train_model(
         "checkpoint": str(best_path),
         "best_val_dice": best_dice,
         "epochs": epoch_count,
+        "encoder_initialization": segmenter.encoder_initialization,
         "history": history,
     }
 
@@ -213,7 +282,7 @@ def evaluate_model(
     case_ids = _case_ids_for_split(split, split_name)
     cases_by_id = {case.case_id: case for case in cases}
     output_root = resolve_project_path(output_dir or deep_get(config, "inference.output_dir"))
-    segmenter = EfficientNetB0Segmenter(config)
+    segmenter = EfficientNetB0Segmenter(config, use_pretrained_encoder=False)
     segmenter.load(checkpoint_path)
 
     per_case: dict[str, dict[str, Any]] = {}
@@ -246,10 +315,12 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     train_parser = subparsers.add_parser("train", help="Train EfficientNet-B0 baseline.")
+    train_parser.add_argument("--config", dest="command_config")
     train_parser.add_argument("--epochs", type=int)
     train_parser.add_argument("--output-dir")
 
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate checkpoint on a case split.")
+    eval_parser.add_argument("--config", dest="command_config")
     eval_parser.add_argument("--checkpoint", required=True)
     eval_parser.add_argument("--split", choices=["train", "val", "test"], default="test")
     eval_parser.add_argument("--output-dir")
@@ -259,11 +330,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    config_path = args.command_config or args.config
     if args.command == "train":
-        result = train_model(args.config, epochs=args.epochs, output_dir=args.output_dir)
+        result = train_model(config_path, epochs=args.epochs, output_dir=args.output_dir)
     elif args.command == "evaluate":
         result = evaluate_model(
-            args.config,
+            config_path,
             checkpoint_path=args.checkpoint,
             split_name=args.split,
             output_dir=args.output_dir,

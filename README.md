@@ -63,14 +63,17 @@ uv run imgseg-efficientnet train --config configs/efficientnet_b0/base.yaml
 uv run imgseg-predict --model efficientnet_b0 --checkpoint checkpoints/efficientnet_b0/best.pt --input-dir Test --output-dir Test_Seg
 ```
 
+EfficientNet-B0 的 checkpoint 不随 Git 仓库分发。运行推理前，需要先从模型负责人提供的共享盘或其他外部存储取得兼容的 `.pt` 文件，再通过 `--checkpoint` 指定其路径。训练、评估、配置项和权重交付说明见 [docs/EFFICIENTNET_B0_WORKFLOW.md](docs/EFFICIENTNET_B0_WORKFLOW.md)。
+
 ## WebUI
 
 ```powershell
 uv run imgseg-webui
 ```
 
-WebUI 支持选择 nnU-Net v2 权重，对单个 NIfTI、NIfTI 文件夹、单张 `.jpg/.png` 或图片文件夹进行批量推理。默认输出目录为 `Test_Seg`，NIfTI 输出 `.nii.gz` 二值 mask，2D 图片输出同名 `.png` 二值 mask。
-普通图片会先按单通道单 slice 转为临时 NIfTI，并使用 identity affine，因此结果只表达像素空间分割，不包含真实物理间距。
+WebUI 通过公共批量推理接口提供 `nnU-Net v2` 与 `EfficientNet-B0 2D U-Net` 模型选择，并按所选模型列出可用 checkpoint；也可以手动填写权重路径。输入支持单个文件或文件夹中的 NIfTI，以及 `.jpg`、`.jpeg`、`.png`、`.bmp`、`.tif`、`.tiff` 图片。默认输出目录为 `Test_Seg`，NIfTI 输出 `.nii.gz` 二值 mask，2D 图片输出同名 `.png` 二值 mask。
+
+普通图片只表达像素空间分割，不包含真实物理间距。选择 nnU-Net v2 时，图片会先按单通道单 slice 转为使用 identity affine 的临时 NIfTI；选择 EfficientNet-B0 时，图片按灰度 2D 输入直接预测。
 
 ## 社区与许可
 

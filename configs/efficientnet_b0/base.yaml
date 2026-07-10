@@ -27,15 +27,19 @@ training:
   amp: true
   optimizer: adamw
   learning_rate: 0.0003
+  weight_decay: 0.01
   loss: dice_bce
 runtime:
   device: auto
   num_workers: 0
+  nifti_cache_size: 8
 checkpoints:
   output_dir: checkpoints/efficientnet_b0
   best: checkpoints/efficientnet_b0/best.pt
 inference:
   threshold: 0.5
+  batch_size: 8
+  amp: true
   output_dir: outputs/efficientnet_b0
 notes:
   - This is the lightweight/WebUI-friendly baseline.

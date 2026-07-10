@@ -40,6 +40,17 @@ def test_collect_inputs_supports_nifti_images_and_unique_case_ids(tmp_path: Path
     assert sorted(item.case_id for item in inputs) == ["Case_A", "Case_A_2"]
 
 
+def test_collect_inputs_keeps_scan_with_mask_like_substring(tmp_path: Path) -> None:
+    image_path = tmp_path / "segment_scan.nii.gz"
+    mask_path = tmp_path / "segment_scan_Seg.nii.gz"
+    write_nifti(image_path, np.zeros((2, 3, 4), dtype=np.float32))
+    write_nifti(mask_path, np.zeros((2, 3, 4), dtype=np.float32))
+
+    inputs = collect_inputs(tmp_path)
+
+    assert [item.source_path for item in inputs] == [image_path.resolve()]
+
+
 def test_natural_sort_orders_numbered_cases_human_readably() -> None:
     paths = [Path("Case10.nii.gz"), Path("Case2.nii.gz"), Path("Case1.nii.gz")]
 
@@ -137,6 +148,126 @@ def test_run_batch_inference_exports_nifti_and_png(monkeypatch, tmp_path: Path) 
     assert outputs["slice"].name == "slice.png"
     assert outputs["scan"].exists()
     assert outputs["slice"].exists()
+
+
+def test_run_batch_inference_routes_efficientnet_nifti_and_png(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    nifti_path = tmp_path / "scan.nii.gz"
+    png_path = tmp_path / "slice.png"
+    write_nifti(nifti_path, np.ones((4, 5, 2), dtype=np.float32))
+    write_png(png_path, np.ones((6, 7), dtype=np.uint8) * 128)
+    inputs = collect_inputs(uploaded_files=[nifti_path, png_path])
+    checkpoint_path = tmp_path / "best.pt"
+    checkpoint_path.write_bytes(b"fake checkpoint")
+    config_path = tmp_path / "efficientnet.yaml"
+    calls: list[tuple[str, Path]] = []
+
+    class FakeEfficientNetSegmenter:
+        def __init__(
+            self,
+            *,
+            config_path: str | Path,
+            device: str | None,
+            use_pretrained_encoder: bool,
+        ) -> None:
+            assert Path(config_path) == config_path_expected
+            assert device == "cpu"
+            assert use_pretrained_encoder is False
+
+        def load(self, path: str | Path) -> None:
+            calls.append(("load", Path(path)))
+
+        def predict_volume(
+            self,
+            image_path: str | Path,
+            output_path: str | Path,
+            *,
+            check_cancelled=None,
+        ) -> dict[str, object]:
+            assert check_cancelled is not None
+            check_cancelled()
+            input_path = Path(image_path)
+            final_output = Path(output_path)
+            calls.append(("nifti", input_path))
+            data, _ = batch.load_nifti_array(input_path)
+            write_nifti(final_output, np.ones_like(data, dtype=np.uint8))
+            return {
+                "output_path": str(final_output),
+                "elapsed_sec": 0.1,
+                "shape": list(data.shape),
+            }
+
+        def predict_image(
+            self,
+            image_path: str | Path,
+            output_path: str | Path,
+        ) -> dict[str, object]:
+            input_path = Path(image_path)
+            final_output = Path(output_path)
+            calls.append(("image", input_path))
+            image = batch._require_cv2().imread(str(input_path), 0)
+            assert image is not None
+            write_png(final_output, np.ones(image.shape, dtype=np.uint8) * 255)
+            return {
+                "output_path": str(final_output),
+                "elapsed_sec": 0.2,
+                "shape": list(image.shape),
+            }
+
+    config_path_expected = config_path
+    monkeypatch.setattr(batch, "EfficientNetB0Segmenter", FakeEfficientNetSegmenter)
+
+    results = run_batch_inference(
+        model_key="efficientnet_b0",
+        inputs=inputs,
+        output_dir=tmp_path / "out",
+        checkpoint_path_or_name=checkpoint_path,
+        config_path=config_path,
+        device="cpu",
+    )
+
+    outputs = {result.case_id: result.output_path for result in results}
+    assert calls == [
+        ("load", checkpoint_path),
+        ("nifti", nifti_path),
+        ("image", png_path),
+    ]
+    assert outputs["scan"].name == "scan_Seg.nii.gz"
+    assert outputs["slice"].name == "slice.png"
+    assert all(result.status == "done" for result in results)
+    assert all(result.output_path.exists() for result in results)
+
+
+def test_cli_batch_wrapper_raises_when_backend_reports_failed_case(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "case.nii.gz"
+    write_nifti(image_path, np.zeros((2, 2, 2), dtype=np.uint8))
+    failed = InferenceResult(
+        case_id="case",
+        input_kind="nifti",
+        input_path=image_path,
+        output_path=tmp_path / "missing.nii.gz",
+        elapsed_sec=0.0,
+        shape=[2, 2, 2],
+        status="failed",
+        message="prediction missing",
+    )
+    monkeypatch.setattr(batch, "run_batch_inference", lambda **_kwargs: [failed])
+
+    try:
+        batch.run_batch_prediction(
+            model_key="nnunet_v2",
+            checkpoint_path="checkpoint.pth",
+            input_dir=image_path,
+        )
+    except RuntimeError as exc:
+        assert "case: prediction missing" in str(exc)
+    else:
+        raise AssertionError("Expected a failed backend result to fail the CLI wrapper")
 
 
 def test_evaluate_result_metrics_uses_reference_when_available(tmp_path: Path) -> None:

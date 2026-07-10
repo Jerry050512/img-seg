@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import time
+import warnings
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from urllib.error import URLError
 
 import cv2
 import numpy as np
@@ -37,7 +40,11 @@ def device_from_config(config: dict[str, Any], requested: str | None = None) -> 
     return torch.device(device_name)
 
 
-def _build_smp_model(config: dict[str, Any]) -> torch.nn.Module:
+def _build_smp_model(
+    config: dict[str, Any],
+    *,
+    use_pretrained_encoder: bool,
+) -> tuple[torch.nn.Module, str]:
     try:
         import segmentation_models_pytorch as smp
     except ImportError as exc:
@@ -47,25 +54,41 @@ def _build_smp_model(config: dict[str, Any]) -> torch.nn.Module:
 
     architecture = str(deep_get(config, "model.architecture", "Unet"))
     encoder_name = str(deep_get(config, "model.encoder_name", "efficientnet-b0"))
-    encoder_weights = deep_get(config, "model.encoder_weights", None)
+    encoder_weights = (
+        deep_get(config, "model.encoder_weights", None) if use_pretrained_encoder else None
+    )
     kwargs = {
         "encoder_name": encoder_name,
         "encoder_weights": encoder_weights,
         "in_channels": int(deep_get(config, "model.in_channels", 1)),
         "classes": int(deep_get(config, "model.classes", 1)),
     }
-    constructor = getattr(smp, architecture)
     try:
-        return constructor(**kwargs)
-    except Exception:
+        constructor = getattr(smp, architecture)
+    except AttributeError as exc:
+        raise ValueError(
+            f"Unknown segmentation_models_pytorch architecture: {architecture}"
+        ) from exc
+    try:
+        model = constructor(**kwargs)
+        initialization = str(encoder_weights) if encoder_weights is not None else "random"
+        return model, initialization
+    except (OSError, RuntimeError, URLError) as pretrained_error:
         if encoder_weights is None:
             raise
         kwargs["encoder_weights"] = None
-        print(
-            "Could not initialize pretrained encoder weights; "
-            "falling back to random initialization."
+        try:
+            model = constructor(**kwargs)
+        except Exception:
+            # If construction also fails without weights, surface the real model/config error.
+            raise
+        warnings.warn(
+            "Could not initialize pretrained encoder weights; falling back to random "
+            f"initialization ({type(pretrained_error).__name__}: {pretrained_error}).",
+            RuntimeWarning,
+            stacklevel=2,
         )
-        return constructor(**kwargs)
+        return model, "random_fallback"
 
 
 def _state_dict_from_checkpoint(checkpoint: object) -> dict[str, torch.Tensor]:
@@ -78,12 +101,51 @@ def _state_dict_from_checkpoint(checkpoint: object) -> dict[str, torch.Tensor]:
     return checkpoint
 
 
+def _validate_checkpoint_config(
+    checkpoint: object,
+    current_config: Mapping[str, Any],
+) -> None:
+    if not isinstance(checkpoint, dict):
+        return
+    saved_config = checkpoint.get("config")
+    if not isinstance(saved_config, Mapping):
+        return
+
+    mismatches = []
+    for key in (
+        "model_key",
+        "model.architecture",
+        "model.encoder_name",
+        "model.in_channels",
+        "model.classes",
+        "data.image_size",
+        "data.slice_axis",
+    ):
+        saved_value = deep_get(saved_config, key)
+        current_value = deep_get(current_config, key)
+        if key == "data.image_size" and saved_value is not None and current_value is not None:
+            saved_value = tuple(int(value) for value in saved_value)
+            current_value = tuple(int(value) for value in current_value)
+        elif key == "data.slice_axis" and saved_value is not None and current_value is not None:
+            saved_value = axis_to_index(saved_value)
+            current_value = axis_to_index(current_value)
+        if saved_value is not None and current_value is not None and saved_value != current_value:
+            mismatches.append(f"{key}: checkpoint={saved_value!r}, config={current_value!r}")
+    if mismatches:
+        details = "; ".join(mismatches)
+        raise ValueError(
+            "Checkpoint configuration is incompatible with the current config: " + details
+        )
+
+
 def _case_id_from_nifti(path: Path) -> str:
     name = path.name
     if name.endswith(".nii.gz"):
-        return name.removesuffix(".nii.gz")
+        stem = name.removesuffix(".nii.gz")
+        return stem.removesuffix("_0000")
     if name.endswith(".nii"):
-        return name.removesuffix(".nii")
+        stem = name.removesuffix(".nii")
+        return stem.removesuffix("_0000")
     return path.stem
 
 
@@ -100,6 +162,7 @@ class EfficientNetB0Segmenter:
         *,
         config_path: str | Path = DEFAULT_CONFIG_PATH,
         device: str | torch.device | None = None,
+        use_pretrained_encoder: bool = False,
     ) -> None:
         self.config = config or load_efficientnet_config(config_path)
         self.device = (
@@ -108,9 +171,25 @@ class EfficientNetB0Segmenter:
         self.image_size = tuple(
             int(x) for x in deep_get(self.config, "data.image_size", [512, 512])
         )
+        if len(self.image_size) != 2 or any(size <= 0 for size in self.image_size):
+            raise ValueError(
+                f"data.image_size must contain two positive integers: {self.image_size}"
+            )
         self.slice_axis = axis_to_index(deep_get(self.config, "data.slice_axis", "z"))
         self.threshold = float(deep_get(self.config, "inference.threshold", 0.5))
-        self.model = _build_smp_model(self.config).to(self.device)
+        if not 0.0 <= self.threshold <= 1.0:
+            raise ValueError(f"inference.threshold must be between 0 and 1: {self.threshold}")
+        self.batch_size = int(deep_get(self.config, "inference.batch_size", 8))
+        if self.batch_size <= 0:
+            raise ValueError(f"inference.batch_size must be positive: {self.batch_size}")
+        self.use_amp = (
+            bool(deep_get(self.config, "inference.amp", True)) and self.device.type == "cuda"
+        )
+        model, self.encoder_initialization = _build_smp_model(
+            self.config,
+            use_pretrained_encoder=use_pretrained_encoder,
+        )
+        self.model = model.to(self.device)
         self.model.eval()
 
     def load(self, checkpoint_path: str | Path) -> None:
@@ -118,39 +197,81 @@ class EfficientNetB0Segmenter:
         if not checkpoint_path.exists():
             raise FileNotFoundError(f"Checkpoint does not exist: {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
+        _validate_checkpoint_config(checkpoint, self.config)
         self.model.load_state_dict(_state_dict_from_checkpoint(checkpoint))
         self.model.to(self.device)
         self.model.eval()
+        self.encoder_initialization = "checkpoint"
+
+    def _predict_resized_masks(
+        self,
+        image_slices: Sequence[np.ndarray],
+        output_shapes: Sequence[tuple[int, int]],
+    ) -> list[np.ndarray]:
+        if not image_slices:
+            return []
+        if len(image_slices) != len(output_shapes):
+            raise ValueError("image_slices and output_shapes must have the same length")
+
+        images = [
+            resize_slice(
+                normalize_slice(image_slice),
+                self.image_size,
+                interpolation=cv2.INTER_LINEAR,
+            )
+            for image_slice in image_slices
+        ]
+        array = np.stack(images, axis=0)[:, None, ...].astype(np.float32, copy=False)
+        tensor = torch.from_numpy(array).to(
+            self.device,
+            non_blocking=self.device.type == "cuda",
+        )
+        with (
+            torch.inference_mode(),
+            torch.amp.autocast("cuda", enabled=self.use_amp),
+        ):
+            logits = self.model(tensor)
+            probabilities = torch.sigmoid(logits)
+        masks = (probabilities[:, 0] >= self.threshold).to(torch.uint8).cpu().numpy()
+        return [
+            _as_uint8_mask(
+                resize_slice(mask, output_shape, interpolation=cv2.INTER_NEAREST)
+            )
+            for mask, output_shape in zip(masks, output_shapes, strict=True)
+        ]
 
     def _predict_resized_mask(
         self,
         image_slice: np.ndarray,
         output_shape: tuple[int, int],
     ) -> np.ndarray:
-        image = normalize_slice(image_slice)
-        image = resize_slice(image, self.image_size, interpolation=cv2.INTER_LINEAR)
-        tensor = torch.from_numpy(image[None, None, ...].astype(np.float32)).to(self.device)
-        with torch.no_grad():
-            logits = self.model(tensor)
-            probabilities = torch.sigmoid(logits)
-        mask = (probabilities[0, 0].detach().cpu().numpy() >= self.threshold).astype(np.uint8)
-        mask = resize_slice(mask, output_shape, interpolation=cv2.INTER_NEAREST)
-        return _as_uint8_mask(mask)
+        return self._predict_resized_masks([image_slice], [output_shape])[0]
 
-    def predict_volume(self, image_path: str | Path, output_path: str | Path) -> PredictionResult:
+    def predict_volume(
+        self,
+        image_path: str | Path,
+        output_path: str | Path,
+        *,
+        check_cancelled: Callable[[], None] | None = None,
+    ) -> PredictionResult:
         started = time.perf_counter()
         image_path = Path(image_path)
         image, reference = load_nifti_array(image_path)
+        if image.ndim != 3:
+            raise ValueError(f"Expected a 3D NIfTI volume, got shape {image.shape}: {image_path}")
         output = np.zeros(tuple(int(dim) for dim in image.shape), dtype=np.uint8)
-        for slice_index in range(output.shape[self.slice_axis]):
-            image_slice = take_slice(image, self.slice_axis, slice_index)
-            mask = self._predict_resized_mask(
-                image_slice,
-                tuple(int(dim) for dim in image_slice.shape),
-            )
-            slicer: list[object] = [slice(None), slice(None), slice(None)]
-            slicer[self.slice_axis] = slice_index
-            output[tuple(slicer)] = mask
+        slice_count = output.shape[self.slice_axis]
+        for start in range(0, slice_count, self.batch_size):
+            if check_cancelled is not None:
+                check_cancelled()
+            indices = list(range(start, min(start + self.batch_size, slice_count)))
+            image_slices = [take_slice(image, self.slice_axis, index) for index in indices]
+            output_shapes = [tuple(int(dim) for dim in item.shape) for item in image_slices]
+            masks = self._predict_resized_masks(image_slices, output_shapes)
+            for slice_index, mask in zip(indices, masks, strict=True):
+                slicer: list[object] = [slice(None), slice(None), slice(None)]
+                slicer[self.slice_axis] = slice_index
+                output[tuple(slicer)] = mask
         saved_path = save_like(reference, output, output_path)
         return {
             "case_id": _case_id_from_nifti(image_path),
@@ -168,7 +289,8 @@ class EfficientNetB0Segmenter:
         mask = self._predict_resized_mask(image, tuple(int(dim) for dim in image.shape))
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(output_path), (mask * 255).astype(np.uint8))
+        if not cv2.imwrite(str(output_path), (mask * 255).astype(np.uint8)):
+            raise OSError(f"Could not write prediction image: {output_path}")
         return {
             "case_id": image_path.stem,
             "output_path": str(output_path),

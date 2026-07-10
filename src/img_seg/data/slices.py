@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+from collections import OrderedDict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -83,6 +84,12 @@ def build_slice_samples(
 ) -> list[SliceSample]:
     """Build deterministic slice samples while preserving case-level splits."""
 
+    for name, keep_ratio in (
+        ("foreground_slice_keep_ratio", foreground_slice_keep_ratio),
+        ("empty_slice_keep_ratio", empty_slice_keep_ratio),
+    ):
+        if not 0.0 <= keep_ratio <= 1.0:
+            raise ValueError(f"{name} must be between 0 and 1: {keep_ratio}")
     axis = axis_to_index(slice_axis)
     cases_by_id = {case.case_id: case for case in cases}
     samples: list[SliceSample] = []
@@ -94,6 +101,10 @@ def build_slice_samples(
 
         mask, _ = load_nifti_array(case.mask_path)
         binary_mask = binarize_mask(mask)
+        if binary_mask.ndim != 3:
+            raise ValueError(
+                f"Expected a 3D mask for case {case_id}, got shape {binary_mask.shape}"
+            )
         original_shape = tuple(int(dim) for dim in binary_mask.shape)
         foreground_counts = binary_mask.sum(axis=projection_axes)
         rng = random.Random(f"{seed}:{case_id}")
@@ -122,19 +133,61 @@ def build_slice_samples(
 class NiftiSliceDataset(Dataset[dict[str, object]]):
     """Torch dataset that reads one 2D NIfTI slice per sample."""
 
-    def __init__(self, samples: Sequence[SliceSample], *, image_size: Sequence[int]) -> None:
+    def __init__(
+        self,
+        samples: Sequence[SliceSample],
+        *,
+        image_size: Sequence[int],
+        nifti_cache_size: int = 8,
+    ) -> None:
         self.samples = list(samples)
         self.image_size = (int(image_size[0]), int(image_size[1]))
+        if any(size <= 0 for size in self.image_size):
+            raise ValueError(f"image_size must contain positive values: {self.image_size}")
+        self.nifti_cache_size = int(nifti_cache_size)
+        if self.nifti_cache_size < 0:
+            raise ValueError(f"nifti_cache_size cannot be negative: {self.nifti_cache_size}")
+        self._nifti_cache: OrderedDict[tuple[Path, Path], tuple[object, object]] = OrderedDict()
         require_nibabel()
 
     def __len__(self) -> int:
         return len(self.samples)
 
+    def __getstate__(self) -> dict[str, object]:
+        """Do not pickle open NIfTI proxies when DataLoader starts worker processes."""
+
+        state = self.__dict__.copy()
+        state["_nifti_cache"] = OrderedDict()
+        return state
+
+    def _load_nifti_pair(self, sample: SliceSample) -> tuple[object, object]:
+        key = (sample.image_path, sample.mask_path)
+        cached = self._nifti_cache.get(key)
+        if cached is not None:
+            self._nifti_cache.move_to_end(key)
+            return cached
+
+        nib = require_nibabel()
+        image_obj = nib.load(str(sample.image_path), keep_file_open=True)
+        mask_obj = nib.load(str(sample.mask_path), keep_file_open=True)
+        if tuple(image_obj.shape) != tuple(mask_obj.shape):
+            raise ValueError(
+                f"Image/mask shape mismatch for case {sample.case_id}: "
+                f"{image_obj.shape} vs {mask_obj.shape}"
+            )
+        if not np.allclose(image_obj.affine, mask_obj.affine):
+            raise ValueError(f"Image/mask affine mismatch for case {sample.case_id}")
+        pair = (image_obj, mask_obj)
+        if self.nifti_cache_size > 0:
+            self._nifti_cache[key] = pair
+            self._nifti_cache.move_to_end(key)
+            while len(self._nifti_cache) > self.nifti_cache_size:
+                self._nifti_cache.popitem(last=False)
+        return pair
+
     def __getitem__(self, index: int) -> dict[str, object]:
         sample = self.samples[index]
-        nib = require_nibabel()
-        image_obj = nib.load(str(sample.image_path))
-        mask_obj = nib.load(str(sample.mask_path))
+        image_obj, mask_obj = self._load_nifti_pair(sample)
         image_slice = take_slice(image_obj.dataobj, sample.slice_axis, sample.slice_index)
         mask_slice = take_slice(mask_obj.dataobj, sample.slice_axis, sample.slice_index)
 
