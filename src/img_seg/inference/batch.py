@@ -276,13 +276,15 @@ def list_checkpoints(
         checkpoint_dir = resolve_project_path(
             deep_get(efficientnet_config, "checkpoints.output_dir", "checkpoints/efficientnet_b0")
         )
-        checkpoints = list(checkpoint_dir.glob("*.pth"))
-        configured_best = resolve_project_path(
+        checkpoints = list(checkpoint_dir.rglob("*.pth"))
+        configured_best_name = Path(
             deep_get(efficientnet_config, "checkpoints.best", checkpoint_dir / "best.pth")
-        )
+        ).name
 
-        def efficientnet_priority(path: Path) -> tuple[int, str]:
-            return (0 if path.resolve() == configured_best.resolve() else 1, path.name)
+        def efficientnet_priority(path: Path) -> tuple[str, bool, str]:
+            relative = path.relative_to(checkpoint_dir)
+            run_name = relative.parts[-2] if len(relative.parts) > 1 else ""
+            return (run_name, path.name == configured_best_name, path.name)
 
         return [
             CheckpointInfo(
@@ -290,7 +292,7 @@ def list_checkpoints(
                 path=checkpoint,
                 checkpoint_name=checkpoint.name,
             )
-            for checkpoint in sorted(checkpoints, key=efficientnet_priority)
+            for checkpoint in sorted(checkpoints, key=efficientnet_priority, reverse=True)
         ]
     if model_key != "nnunet_v2":
         return []

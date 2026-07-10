@@ -6,11 +6,10 @@ import argparse
 import json
 import random
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import numpy as np
 import torch
@@ -30,10 +29,12 @@ from img_seg.models.efficientnet_b0 import (
 
 DEFAULT_CHECKPOINT_NAME = "best.pth"
 DEFAULT_TRAIN_LOG_NAME = "train.log"
+RUN_NAME_FORMAT = "%Y%m%dT%H%M%S%fZ"
 
 
 @dataclass(frozen=True)
 class TrainingArtifacts:
+    run_name: str
     checkpoint: Path
     log_file: Path
 
@@ -41,7 +42,7 @@ class TrainingArtifacts:
 @dataclass(frozen=True)
 class TrainingLog:
     path: Path
-    run_id: str = field(default_factory=lambda: uuid4().hex)
+    run_name: str
 
     def write(self, event: str, **values: object) -> None:
         """Append one self-contained JSON record and flush it to disk."""
@@ -49,7 +50,7 @@ class TrainingLog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "timestamp": datetime.now(UTC).isoformat(),
-            "run_id": self.run_id,
+            "run_name": self.run_name,
             "event": event,
             **values,
         }
@@ -166,29 +167,96 @@ def evaluate_slice_loader(
     }
 
 
+def timestamped_run_name(timestamp: datetime | None = None) -> str:
+    """Return a sortable, filesystem-safe UTC name for one training run."""
+
+    value = timestamp or datetime.now(UTC)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).strftime(RUN_NAME_FORMAT)
+
+
 def resolve_training_artifacts(
     config: dict[str, Any],
     *,
     output_dir: str | Path | None = None,
     log_file: str | Path | None = None,
+    run_name: str | None = None,
 ) -> TrainingArtifacts:
     if output_dir is not None:
         artifact_dir = resolve_project_path(output_dir)
-        checkpoint_path = artifact_dir / DEFAULT_CHECKPOINT_NAME
-        default_log_path = artifact_dir / DEFAULT_TRAIN_LOG_NAME
+        checkpoint_template = artifact_dir / DEFAULT_CHECKPOINT_NAME
+        log_template = artifact_dir / DEFAULT_TRAIN_LOG_NAME
     else:
-        checkpoint_path = project_path_from_config(config, "checkpoints.best")
-        default_log_path = resolve_project_path(
+        checkpoint_template = project_path_from_config(config, "checkpoints.best")
+        log_template = resolve_project_path(
             deep_get(config, "training.log_file", "outputs/efficientnet_b0/train.log")
         )
+    if log_file is not None:
+        log_template = resolve_project_path(log_file)
 
-    if checkpoint_path.suffix.lower() != ".pth":
-        raise ValueError(f"EfficientNet-B0 checkpoint must use the .pth suffix: {checkpoint_path}")
+    if checkpoint_template.suffix.lower() != ".pth":
+        raise ValueError(
+            f"EfficientNet-B0 checkpoint must use the .pth suffix: {checkpoint_template}"
+        )
 
+    name = run_name or timestamped_run_name()
     return TrainingArtifacts(
-        checkpoint=checkpoint_path,
-        log_file=resolve_project_path(log_file) if log_file is not None else default_log_path,
+        run_name=name,
+        checkpoint=checkpoint_template.parent / name / checkpoint_template.name,
+        log_file=log_template.parent / name / log_template.name,
     )
+
+
+def _main_hyperparameters(
+    config: dict[str, Any],
+    *,
+    epochs: int,
+    batch_size: int,
+    optimizer: str,
+    loss: str,
+    device: torch.device,
+    num_workers: int,
+    amp_enabled: bool,
+) -> dict[str, Any]:
+    return {
+        "model": {
+            "architecture": deep_get(config, "model.architecture", "Unet"),
+            "encoder_name": deep_get(config, "model.encoder_name", "efficientnet-b0"),
+            "encoder_weights": deep_get(config, "model.encoder_weights"),
+            "in_channels": int(deep_get(config, "model.in_channels", 1)),
+            "classes": int(deep_get(config, "model.classes", 1)),
+        },
+        "data": {
+            "image_size": deep_get(config, "data.image_size", [512, 512]),
+            "slice_axis": deep_get(config, "data.slice_axis", "z"),
+            "foreground_slice_keep_ratio": float(
+                deep_get(config, "data.foreground_slice_keep_ratio", 1.0)
+            ),
+            "empty_slice_keep_ratio": float(
+                deep_get(config, "data.empty_slice_keep_ratio", 0.25)
+            ),
+        },
+        "optimization": {
+            "seed": int(deep_get(config, "training.seed", 42)),
+            "epochs": epochs,
+            "batch_size": batch_size,
+            "optimizer": optimizer,
+            "learning_rate": float(deep_get(config, "training.learning_rate", 0.0003)),
+            "weight_decay": float(deep_get(config, "training.weight_decay", 0.01)),
+            "loss": loss,
+            "amp_requested": bool(deep_get(config, "training.amp", True)),
+            "amp_enabled": amp_enabled,
+        },
+        "runtime": {
+            "device": str(device),
+            "num_workers": num_workers,
+        },
+        "validation": {
+            "threshold": float(deep_get(config, "inference.threshold", 0.5)),
+            "aggregation": "case_macro_all_slices",
+        },
+    }
 
 
 def _train_one_epoch(
@@ -298,18 +366,26 @@ def train_model(
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     best_dice = -1.0
     artifacts = resolve_training_artifacts(config, output_dir=output_dir, log_file=log_file)
-    training_log = TrainingLog(artifacts.log_file)
+    training_log = TrainingLog(artifacts.log_file, artifacts.run_name)
     training_log.write(
         "run_started",
         config=str(resolve_project_path(config_path)),
-        device=str(device),
-        epochs=epoch_count,
         train_cases=len(split.train),
         val_cases=len(split.val),
         train_slices=len(train_dataset),
         val_slices=len(val_dataset),
         checkpoint=str(artifacts.checkpoint),
         encoder_initialization=segmenter.encoder_initialization,
+        hyperparameters=_main_hyperparameters(
+            config,
+            epochs=epoch_count,
+            batch_size=batch_size,
+            optimizer=optimizer_name,
+            loss=loss_name,
+            device=device,
+            num_workers=num_workers,
+            amp_enabled=use_amp,
+        ),
     )
 
     history = []
@@ -344,6 +420,7 @@ def train_model(
                     "best_val_dice": best_dice,
                     "validation": "case_macro_all_slices",
                     "encoder_initialization": segmenter.encoder_initialization,
+                    "run_name": artifacts.run_name,
                 },
                 artifacts.checkpoint,
             )
@@ -355,9 +432,9 @@ def train_model(
             )
 
     result = {
+        "run_name": artifacts.run_name,
         "checkpoint": str(artifacts.checkpoint),
         "log_file": str(artifacts.log_file),
-        "run_id": training_log.run_id,
         "best_val_dice": best_dice,
         "epochs": epoch_count,
         "encoder_initialization": segmenter.encoder_initialization,

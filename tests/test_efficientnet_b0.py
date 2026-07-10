@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import cv2
@@ -18,6 +19,7 @@ from img_seg.training.efficientnet_b0_cli import (
     build_parser,
     evaluate_slice_loader,
     resolve_training_artifacts,
+    timestamped_run_name,
 )
 
 
@@ -294,6 +296,8 @@ def test_training_writes_pth_checkpoint_and_jsonl_log(
         lambda *_args, **_kwargs: [sample],
     )
     monkeypatch.setattr(efficientnet_b0_cli, "EfficientNetB0Segmenter", FakeSegmenter)
+    run_name = "20260710T083015123456Z"
+    monkeypatch.setattr(efficientnet_b0_cli, "timestamped_run_name", lambda: run_name)
     monkeypatch.setattr(
         efficientnet_b0_cli,
         "evaluate_slice_loader",
@@ -317,22 +321,48 @@ def test_training_writes_pth_checkpoint_and_jsonl_log(
 
     assert checkpoint_path.name == "best.pth"
     assert checkpoint_path.exists()
+    assert checkpoint_path.parent.name == run_name
     assert log_path.name == "train.log"
+    assert log_path.parent == checkpoint_path.parent
+    assert result["run_name"] == run_name
     assert [record["event"] for record in records] == [
         "run_started",
         "epoch_completed",
         "checkpoint_saved",
         "run_completed",
     ]
-    assert {record["run_id"] for record in records} == {result["run_id"]}
+    assert {record["run_name"] for record in records} == {run_name}
+    hyperparameters = records[0]["hyperparameters"]
+    assert hyperparameters["model"]["encoder_name"] == "efficientnet-b0"
+    assert hyperparameters["data"]["image_size"] == [64, 64]
+    assert hyperparameters["optimization"] == {
+        "seed": 42,
+        "epochs": 1,
+        "batch_size": 1,
+        "optimizer": "adamw",
+        "learning_rate": 0.001,
+        "weight_decay": 0.0,
+        "loss": "dice_bce",
+        "amp_requested": False,
+        "amp_enabled": False,
+    }
+    assert hyperparameters["runtime"] == {"device": "cpu", "num_workers": 0}
     assert records[1]["dice"] == pytest.approx(0.75)
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    assert checkpoint["run_name"] == run_name
+
+
+def test_timestamped_run_name_is_sortable_utc_timestamp() -> None:
+    timestamp = datetime(2026, 7, 10, 8, 30, 15, 123456, tzinfo=UTC)
+
+    assert timestamped_run_name(timestamp) == "20260710T083015123456Z"
 
 
 def test_training_rejects_non_pth_checkpoint_path(tmp_path: Path) -> None:
     config = {"checkpoints": {"best": str(tmp_path / "best.pt")}}
 
     with pytest.raises(ValueError, match=r"\.pth suffix"):
-        resolve_training_artifacts(config)
+        resolve_training_artifacts(config, run_name="20260710T083015123456Z")
 
 
 def test_efficientnet_parser_accepts_config_before_or_after_subcommand() -> None:

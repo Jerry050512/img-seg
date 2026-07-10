@@ -61,10 +61,10 @@ uv run python utils/audit_nifti.py dataset --labels
 uv run imgseg-nnunet --config configs/nnunet_v2/base.yaml prepare
 uv run python utils/compress_nii.py dataset --recursive
 uv run imgseg-efficientnet train --config configs/efficientnet_b0/base.yaml
-uv run imgseg-predict --model efficientnet_b0 --checkpoint checkpoints/efficientnet_b0/best.pth --input-dir Test --output-dir Test_Seg
+uv run imgseg-predict --model efficientnet_b0 --checkpoint checkpoints/efficientnet_b0/20260710T083015123456Z/best.pth --input-dir Test --output-dir Test_Seg
 ```
 
-EfficientNet-B0 的 checkpoint 不随 Git 仓库分发。运行推理前，需要先从模型负责人提供的共享盘或其他外部存储取得兼容的 `.pth` 文件，再通过 `--checkpoint` 指定其路径。训练默认将逐轮记录追加到 `outputs/efficientnet_b0/train.log`；训练、评估、配置项和权重交付说明见 [docs/EFFICIENTNET_B0_WORKFLOW.md](docs/EFFICIENTNET_B0_WORKFLOW.md)。
+EfficientNet-B0 的 checkpoint 不随 Git 仓库分发。每次训练使用微秒精度 UTC 时间戳命名独立运行目录，并分别保存 `<时间戳>/best.pth` 与 `<时间戳>/train.log`。日志包含主要超参数和逐轮指标；运行推理前，需要先从模型负责人提供的共享盘或其他外部存储取得兼容的 `.pth` 文件，再通过 `--checkpoint` 指定其路径。详细说明见 [docs/EFFICIENTNET_B0_WORKFLOW.md](docs/EFFICIENTNET_B0_WORKFLOW.md)。
 
 ## WebUI
 

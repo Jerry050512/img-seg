@@ -98,8 +98,14 @@ def test_list_efficientnet_checkpoints_uses_pth_and_prefers_configured_best(
 ) -> None:
     checkpoint_dir = tmp_path / "efficientnet"
     checkpoint_dir.mkdir()
-    (checkpoint_dir / "best.pth").write_bytes(b"best")
-    (checkpoint_dir / "epoch_10.pth").write_bytes(b"epoch")
+    older_run = checkpoint_dir / "20260710T010000000000Z"
+    newer_run = checkpoint_dir / "20260710T020000000000Z"
+    older_run.mkdir()
+    newer_run.mkdir()
+    (older_run / "best.pth").write_bytes(b"older best")
+    (older_run / "epoch_10.pth").write_bytes(b"older epoch")
+    (newer_run / "best.pth").write_bytes(b"newer best")
+    (checkpoint_dir / "legacy_best.pth").write_bytes(b"legacy")
     (checkpoint_dir / "legacy.pt").write_bytes(b"legacy")
     config_path = tmp_path / "efficientnet.yaml"
     config_path.write_text(
@@ -119,7 +125,15 @@ def test_list_efficientnet_checkpoints_uses_pth_and_prefers_configured_best(
 
     assert [checkpoint.checkpoint_name for checkpoint in checkpoints] == [
         "best.pth",
+        "best.pth",
         "epoch_10.pth",
+        "legacy_best.pth",
+    ]
+    assert [checkpoint.path.parent.name for checkpoint in checkpoints] == [
+        newer_run.name,
+        older_run.name,
+        older_run.name,
+        checkpoint_dir.name,
     ]
 
 
