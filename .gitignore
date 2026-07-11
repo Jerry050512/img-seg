@@ -22,6 +22,8 @@ runs/
 wandb/
 mlruns/
 *.log
+sketchboard.txt
+tmp/
 
 # Local data: keep large data out of Git, share via agreed external storage.
 dataset/**/*.nii

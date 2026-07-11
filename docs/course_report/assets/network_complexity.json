@@ -1,0 +1,13 @@
+{
+  "input": [
+    1,
+    1,
+    512,
+    512
+  ],
+  "parameters": 46324558,
+  "parameters_million": 46.324558,
+  "conv_flops": 119267966976,
+  "conv_flops_giga": 119.267966976,
+  "counting_convention": "one multiply and one add are counted as two FLOPs; convolution and transposed convolution only"
+}
