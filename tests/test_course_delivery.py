@@ -7,6 +7,7 @@ import torch
 import yaml
 
 from img_seg.course_delivery import (
+    checkpoint_parameter_count,
     config_with_dataset,
     evaluate_predictions,
     normalize_legacy_argv,
@@ -91,3 +92,16 @@ def test_course_evaluation_reports_required_metrics(tmp_path: Path) -> None:
     assert metrics["mIoU"] == (0.5 + 2 / 3) / 2
     assert metrics["FPS"] == 0.5
     assert metrics["Params(M)"] == 0.00001
+
+
+def test_checkpoint_parameter_count_deduplicates_aliased_state_dict_keys(
+    tmp_path: Path,
+) -> None:
+    checkpoint = tmp_path / "nnunet.pth"
+    weight = torch.ones(3, 4)
+    torch.save(
+        {"network_weights": {"layer.weight": weight, "layer.alias": weight}},
+        checkpoint,
+    )
+
+    assert checkpoint_parameter_count(checkpoint) == 12

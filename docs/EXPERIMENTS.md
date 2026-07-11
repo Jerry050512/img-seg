@@ -25,3 +25,9 @@
 | **macro average** | — | **0.9065** | **0.8313** | **0.9281** | **0.8878** | **11.16** |
 
 训练 loss 继续下降时，验证 Dice 在第 3 轮后未再超过 0.7916，说明当前配置很早进入验证性能平台期，并存在过拟合可能；后续可加入 early stopping，并在固定 split 上验证数据增强或正则化调整。两个测试 case 的 Dice 相差约 0.0782，且测试集规模很小，因此当前 0.9065 的宏平均结果应视为本项目固定划分上的基线，不宜直接外推为稳定泛化性能。
+
+## 2026-07-11 nnU-Net 交付 checkpoint 精简验证
+
+原始 `checkpoint_best.pth` 为 370,794,358 bytes（353.62 MiB），其中网络 FP32 权重和 optimizer state 各占约 176.71 MiB。使用 `utils/export_nnunet_checkpoint.py` 删除仅用于断点续训的 optimizer、grad scaler 和日志字段后，得到 nnU-Net 原生推理接口可读取的 `checkpoint_best_inference.pth`：185,411,378 bytes（176.82 MiB），缩小 50.0%，低于课程 200 MB 单文件上限。导出过程不改变 dtype，并逐张量验证权重完全一致；文件 SHA-256 为 `6abfe3194dc01a9cbbf2f473a7a5ba9fbf290a98e5440fc8bd88e51e8f0375f5`。
+
+通过根目录 `test.py` 在 RTX 4060 Laptop 上对 `S_3` 重新推理，得到 Dice 0.9831、Precision 0.9772、Recall 0.9891、PixelAcc 0.9855，与原 checkpoint 的既有同机结果一致。该交付 checkpoint 仅可用于推理，不能用于恢复训练。

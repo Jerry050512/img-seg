@@ -64,6 +64,17 @@ uv run python train.py --model efficientnet_b0 --config configs/efficientnet_b0/
 uv run python predict.py image /data/evaluation/sample.nii.gz weight ./best_model.pth output ./result.png
 ```
 
+nnU-Net 的训练 checkpoint 同时保存 optimizer state，体积约为仅推理权重的两倍。
+交付前可导出保持 FP32 权重不变、且能被 nnU-Net 原生命令直接读取的推理版本：
+
+```powershell
+uv run python utils/export_nnunet_checkpoint.py `
+  checkpoints/nnunet_v2_runs/<run-id>/Dataset501_ImgSeg/nnUNetTrainer_200epochs__nnUNetPlans__2d/fold_0/checkpoint_best.pth `
+  --output checkpoints/nnunet_v2_runs/<run-id>/Dataset501_ImgSeg/nnUNetTrainer_200epochs__nnUNetPlans__2d/fold_0/checkpoint_best_inference.pth
+```
+
+推理时将 checkpoint 名称改为 `checkpoint_best_inference.pth` 即可；该文件不能用于断点续训。
+
 ## 当前状态
 
 - 原始数据位于 `dataset/`，读取布局规则位于 `configs/data/dataset.yaml`。

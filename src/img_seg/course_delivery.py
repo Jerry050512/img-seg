@@ -240,7 +240,17 @@ def checkpoint_parameter_count(checkpoint: str | Path) -> int:
                 and not str(name).endswith(("running_mean", "running_var", "num_batches_tracked"))
             ]
             if tensors:
-                return sum(int(tensor.numel()) for tensor in tensors)
+                unique_tensors = {
+                    (
+                        tensor.untyped_storage().data_ptr(),
+                        tensor.storage_offset(),
+                        tuple(tensor.shape),
+                        tuple(tensor.stride()),
+                        tensor.dtype,
+                    ): tensor
+                    for tensor in tensors
+                }
+                return sum(int(tensor.numel()) for tensor in unique_tensors.values())
     return 0
 
 
