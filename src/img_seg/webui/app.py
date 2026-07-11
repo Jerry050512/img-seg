@@ -32,6 +32,7 @@ APP_TITLE = "ImgSeg WebUI"
 DEFAULT_MODEL = "nnunet_v2"
 DEFAULT_CONFIGS = {
     "nnunet_v2": "configs/nnunet_v2/base.yaml",
+    "monai_segresnet": "configs/monai_segresnet/base.yaml",
     "efficientnet_b0": "configs/efficientnet_b0/base.yaml",
 }
 WEBUI_PROGRESS = gr.Progress(track_tqdm=True)

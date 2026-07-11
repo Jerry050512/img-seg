@@ -222,7 +222,7 @@ SegResNet 使用残差块构建 3D 编码器-解码器，以残差连接改善�
 
 EfficientNet 通过复合缩放同时协调网络深度、宽度和输入分辨率 @efficientnet。项目使用 `segmentation_models_pytorch.Unet`，以 ImageNet 预训练 EfficientNet-B0 作为编码器，解码器沿用 U-Net 跳跃连接。输入为 z 轴单通道切片，统一缩放至 $512 times 512$，输出 1 通道 logits。
 
-实际配置为 100 epoch、batch size=8、AdamW、learning rate=3e-4、weight decay=0.01、AMP、Dice+BCE 和阈值 0.5；保留全部含前景切片和 25% 空切片，体推理后逐层重组 NIfTI。`checkpoints/efficientnet_b0/best.pt` 在 epoch 3 达到最佳验证 Dice 0.7916，随后训练 loss 继续下降但验证性能未再提高，表现出较早的过拟合。其测试宏平均 Dice 0.9065、前景 IoU 0.8313、Precision 0.9281、Recall 0.8878，端到端耗时 11.16 s/case。按当前依赖与配置实际构建模型后，共有 6.250893 M 参数；对单张 $512 times 512$ 切片统计卷积与转置卷积，计算量为 23.5836 GFLOPs。
+实际配置为 100 epoch、batch size=8、AdamW、learning rate=3e-4、weight decay=0.01、AMP、Dice+BCE 和阈值 0.5；保留全部含前景切片和 25% 空切片，体推理后逐层重组 NIfTI。`checkpoints/efficientnet_b0/20260710T152124825334Z/best.pth` 在 epoch 3 达到最佳验证 Dice 0.7916，随后训练 loss 继续下降但验证性能未再提高，表现出较早的过拟合。其测试宏平均 Dice 0.9065、前景 IoU 0.8313、Precision 0.9281、Recall 0.8878，端到端耗时 11.16 s/case。按当前依赖与配置实际构建模型后，共有 6.250893 M 参数；对单张 $512 times 512$ 切片统计卷积与转置卷积，计算量为 23.5836 GFLOPs。
 
 #figure(
   table(
@@ -303,7 +303,7 @@ EfficientNet 完成 100 epoch，ImageNet encoder 初始化成功。最佳验证 
 
 ```powershell
 uv run imgseg-efficientnet train --config configs/efficientnet_b0/base.yaml
-uv run imgseg-efficientnet evaluate --config configs/efficientnet_b0/base.yaml --checkpoint checkpoints/efficientnet_b0/best.pt --split test
+uv run imgseg-efficientnet evaluate --config configs/efficientnet_b0/base.yaml --checkpoint checkpoints/efficientnet_b0/20260710T152124825334Z/best.pth --split test
 ```
 
 == checkpoint 选择与推理
@@ -314,9 +314,9 @@ uv run imgseg-efficientnet evaluate --config configs/efficientnet_b0/base.yaml -
 
 == 统一推理接口与 WebUI
 
-WebUI 基于 Gradio @gradio 构建，不直接调用某个模型内部层，而通过公共 inference 模块完成输入收集、模型/权重选择、推理、输出二值化、结果评价和预览。nnU-Net 与 EfficientNet 已接入统一选择；SegResNet 当前提供独立的 `load()`、`predict_volume()` 和 CLI，但尚未注册到公共 batch/WebUI。界面已经实现：
+WebUI 基于 Gradio @gradio 构建，不直接调用某个模型内部层，而通过公共 inference 模块完成输入收集、模型/权重选择、推理、输出二值化、结果评价和预览。nnU-Net、SegResNet 与 EfficientNet 均已接入统一选择；SegResNet 对二维普通图片给出明确错误，仅接受与训练协议一致的 3D NIfTI。界面已经实现：
 
-- 选择 nnU-Net/EfficientNet 与对应 checkpoint；
+- 选择 nnU-Net/SegResNet/EfficientNet 与对应 checkpoint；
 - 输入单个 NIfTI、NIfTI 目录、单张 JPG/PNG 或图片目录；
 - 填写输出目录，默认 `Test_Seg`；
 - 显示批量推理进度、单例状态与耗时，并支持取消；
@@ -332,7 +332,7 @@ uv run imgseg-webui
 
 普通 2D 图片被包装为单通道单 slice 的临时 NIfTI，使用 identity affine，因此该输出只表达像素空间分割，不代表真实物理坐标。课程展示时应明确这一限制。
 
-当前 WebUI 已统一接入 nnU-Net 与 EfficientNet-B0；SegResNet 已具备相同的 `load()`、`predict_volume()` 和 CLI 接口，但尚未注册到公共 batch inference 的模型下拉框。因此现有界面证明了统一推理层的可扩展性，但不能表述为“三模型均已在同一下拉框可选”。后续只需补充 SegResNet 的 checkpoint 配置映射与批处理路由，无需重写界面。
+当前 WebUI 已统一接入三个模型。公共输入收集器同时修正了 `case/image.nii.gz` 布局的 case id 推导，使其能与同目录 `mask.nii.gz` 正确配对；模型切换只改变配置、checkpoint 枚举和批处理后端，不改变界面与评价逻辑。
 
 = 实验结果与对比分析
 
@@ -411,6 +411,8 @@ best 在所有主要宏平均指标上均优于 final：Dice 提高 0.0073，二
 SegResNet 的测试 Dice 比验证 Dice 高 0.1294。该差距由两个极小集合的样本构成差异造成：验证中的 `1_23_XY` 仅 0.7785，而测试中的 `S_3` 达到 0.9769。它在两个测试 case 上都超过 0.93，说明结果并非只由单例抬高；但每组仅 2 例，仍不足以估计稳定泛化性能。文件名族如 `S_1/S_3/S_4/S_5`、`nose_layer*` 是否来自同一对象也需要原始元数据确认，否则 case-level split 仍可能低估 subject-level 相关性。
 
 == EfficientNet-B0 测试基线
+
+本机合入两次格式一致的新式 timestamp run：2026-07-10 的 100-epoch run（`20260710T152124825334Z`）测试 Dice 0.9065、IoU 0.8313、Precision 0.9281、Recall 0.8878；时间更新的 2026-07-11 30-epoch run（`20260711T031117144692Z`）对应为 0.9023、0.8248、0.9332、0.8755。后一次虽时间更新但综合重叠指标更低，因此最终横向对比仍选择前一次的最佳 checkpoint；两次日志与指标均保留在实验记录中，避免以文件时间替代验证/测试证据进行模型选择。
 
 #table(
   columns: (1.2fr, 1.2fr, 0.8fr, 0.8fr, 0.85fr, 0.85fr, 0.9fr),
@@ -531,7 +533,7 @@ EfficientNet 在大尺寸 `2_25_XY` 上 Recall 0.8208，说明逐 slice 轻量�
 - 所有二分类 mask 统一执行 `mask > 0`；
 - nnU-Net 实验保留 run id、debug、plans、epoch CSV、checkpoint 与 runtime JSON；
 - SegResNet 保留 200 epoch history、best/last checkpoint、prediction manifest 与逐 case 混淆矩阵；
-- 三模型对比数值及口径写入 `assets/model_comparison.json`，图表可由脚本重新生成；
+- 三模型对比数值及口径写入 `assets/model_comparison.json`，图表可由脚本重新生成；EfficientNet 的 100/30-epoch 两次 timestamp run 均在实验记录中保留，横表采用 Dice 更高的 100-epoch run；
 - 测试输出保留原 reference shape 和 affine；
 - 图表由 `docs/course_report/generate_assets.py` 从原始指标和 NIfTI 重新生成；
 - 报告对缺失结果使用占位符，不填入估计或论文值。
@@ -556,7 +558,7 @@ EfficientNet 在大尺寸 `2_25_XY` 上 Recall 0.8208，说明逐 slice 轻量�
 
 本项目已经完成数据规范化、case-level 划分、三模型训练与整例测试、模型复杂度统计、定性误差分析和批量推理界面主体。共同测试集上，SegResNet 取得 Dice 0.9555 与 mIoU 0.9269，略高于 nnU-Net 的 0.9490 与 0.9192；nnU-Net Precision 0.9581 更高，预测更保守。EfficientNet 在其分支测试集上取得 Dice 0.9065，未达到 0.92 目标，但保持较短的 11.16 s/case 端到端时间。现有证据说明：3D 上下文有助于本任务的弱边界和跨层连续性，自配置 nnU-Net 是稳定强基线，轻量 2D 模型更适合速度优先场景。
 
-上述结论仍受每个验证/测试集合仅 2 case、EfficientNet 测试 case 不一致和跨硬件计时影响，不能外推为总体性能排序。最终提交前必须补齐组员姓名/学号与 checkpoint 外部链接，并把 SegResNet 注册到 WebUI；后续最优先的实验是按真实对象分组的 5-fold 交叉验证，以及在同一 GPU 和同一 test split 上重测三模型速度。
+上述结论仍受每个验证/测试集合仅 2 case、EfficientNet 测试 case 不一致和跨硬件计时影响，不能外推为总体性能排序。最终提交前必须补齐组员姓名/学号与 checkpoint 外部链接；后续最优先的实验是按真实对象分组的 5-fold 交叉验证，以及在同一 GPU 和同一 test split 上重测三模型速度。
 
 #pagebreak()
 = 参考文献
@@ -603,8 +605,8 @@ uv run imgseg-segresnet --config configs/monai_segresnet/base.yaml evaluate --pr
 
 ```powershell
 uv run imgseg-efficientnet train --config configs/efficientnet_b0/base.yaml
-uv run imgseg-efficientnet evaluate --config configs/efficientnet_b0/base.yaml --checkpoint checkpoints/efficientnet_b0/best.pt --split test --output-dir outputs/efficientnet_b0 --output-json outputs/efficientnet_b0/metrics.json
-uv run imgseg-predict --model efficientnet_b0 --config configs/efficientnet_b0/base.yaml --checkpoint checkpoints/efficientnet_b0/best.pt --input-dir Test --output-dir Test_Seg
+uv run imgseg-efficientnet evaluate --config configs/efficientnet_b0/base.yaml --checkpoint checkpoints/efficientnet_b0/20260710T152124825334Z/best.pth --split test --output-dir outputs/efficientnet_b0 --output-json outputs/efficientnet_b0/metrics.json
+uv run imgseg-predict --model efficientnet_b0 --config configs/efficientnet_b0/base.yaml --checkpoint checkpoints/efficientnet_b0/20260710T152124825334Z/best.pth --input-dir Test --output-dir Test_Seg
 ```
 
 == 报告构建

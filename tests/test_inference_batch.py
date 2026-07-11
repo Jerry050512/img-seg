@@ -51,6 +51,22 @@ def test_collect_inputs_keeps_scan_with_mask_like_substring(tmp_path: Path) -> N
     assert [item.source_path for item in inputs] == [image_path.resolve()]
 
 
+def test_case_directory_layout_uses_parent_name_for_image_and_mask(tmp_path: Path) -> None:
+    case_dir = tmp_path / "Case A"
+    image_path = case_dir / "image.nii.gz"
+    mask_path = case_dir / "mask.nii.gz"
+    write_nifti(image_path, np.zeros((2, 3, 4), dtype=np.float32))
+    write_nifti(mask_path, np.zeros((2, 3, 4), dtype=np.uint8))
+
+    inputs = collect_inputs(tmp_path)
+    references = collect_reference_masks(tmp_path)
+
+    assert [(item.case_id, item.source_path) for item in inputs] == [
+        ("Case_A", image_path.resolve())
+    ]
+    assert references == {"Case_A": mask_path}
+
+
 def test_natural_sort_orders_numbered_cases_human_readably() -> None:
     paths = [Path("Case10.nii.gz"), Path("Case2.nii.gz"), Path("Case1.nii.gz")]
 
@@ -64,10 +80,7 @@ def test_natural_sort_orders_numbered_cases_human_readably() -> None:
 def test_list_checkpoints_prefers_final_then_best(tmp_path: Path) -> None:
     results_dir = tmp_path / "checkpoints"
     fold_dir = (
-        results_dir
-        / "Dataset777_Tiny"
-        / "nnUNetTrainer_200epochs__nnUNetPlans__2d"
-        / "fold_0"
+        results_dir / "Dataset777_Tiny" / "nnUNetTrainer_200epochs__nnUNetPlans__2d" / "fold_0"
     )
     fold_dir.mkdir(parents=True)
     (fold_dir / "checkpoint_best.pth").write_bytes(b"best")
@@ -190,19 +203,12 @@ def test_prepare_checkpoint_name_rejects_non_checkpoint_file(tmp_path: Path) -> 
 def test_prepare_checkpoint_name_avoids_external_name_collisions(tmp_path: Path) -> None:
     results_dir = tmp_path / "results"
     configured_fold_dir = (
-        results_dir
-        / "Dataset777_Tiny"
-        / "nnUNetTrainer_200epochs__nnUNetPlans__2d"
-        / "fold_0"
+        results_dir / "Dataset777_Tiny" / "nnUNetTrainer_200epochs__nnUNetPlans__2d" / "fold_0"
     )
     configured_fold_dir.mkdir(parents=True)
     (configured_fold_dir / "checkpoint_best.pth").write_bytes(b"old")
     external_model_dir = (
-        tmp_path
-        / "runs"
-        / "run_1"
-        / "Dataset777_Tiny"
-        / "nnUNetTrainer_200epochs__nnUNetPlans__2d"
+        tmp_path / "runs" / "run_1" / "Dataset777_Tiny" / "nnUNetTrainer_200epochs__nnUNetPlans__2d"
     )
     external_fold_dir = external_model_dir / "fold_0"
     external_fold_dir.mkdir(parents=True)
@@ -366,6 +372,39 @@ def test_run_batch_inference_routes_efficientnet_nifti_and_png(
     assert outputs["slice"].name == "slice.png"
     assert all(result.status == "done" for result in results)
     assert all(result.output_path.exists() for result in results)
+
+
+def test_run_batch_inference_routes_segresnet_nifti(monkeypatch, tmp_path: Path) -> None:
+    nifti_path = tmp_path / "scan.nii.gz"
+    write_nifti(nifti_path, np.ones((4, 5, 2), dtype=np.float32))
+    checkpoint_path = tmp_path / "best.pt"
+    checkpoint_path.write_bytes(b"fake")
+
+    class FakeSegResNetSegmenter:
+        def __init__(self, config_path, *, device=None):
+            assert Path(config_path) == tmp_path / "config.yaml"
+            assert device == "cpu"
+
+        def load(self, path):
+            assert Path(path) == checkpoint_path
+
+        def predict_volume(self, image_path, output_path):
+            data, _ = batch.load_nifti_array(image_path)
+            write_nifti(Path(output_path), np.ones_like(data, dtype=np.uint8))
+            return {"output_path": str(output_path), "elapsed_sec": 0.2, "shape": list(data.shape)}
+
+    monkeypatch.setattr(batch, "MonaiSegResNetSegmenter", FakeSegResNetSegmenter)
+    results = run_batch_inference(
+        model_key="monai_segresnet",
+        inputs=collect_inputs(nifti_path),
+        output_dir=tmp_path / "out",
+        checkpoint_path_or_name=checkpoint_path,
+        config_path=tmp_path / "config.yaml",
+        device="cpu",
+    )
+
+    assert results[0].output_path.name == "scan_Seg.nii.gz"
+    assert results[0].status == "done"
 
 
 def test_cli_batch_wrapper_raises_when_backend_reports_failed_case(

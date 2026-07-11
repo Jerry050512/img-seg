@@ -31,6 +31,10 @@ from img_seg.models.efficientnet_b0 import (
     DEFAULT_CONFIG_PATH as DEFAULT_EFFICIENTNET_CONFIG,
 )
 from img_seg.models.efficientnet_b0 import EfficientNetB0Segmenter, load_efficientnet_config
+from img_seg.models.monai_segresnet import (
+    DEFAULT_CONFIG_PATH as DEFAULT_SEGRESNET_CONFIG,
+)
+from img_seg.models.monai_segresnet import MonaiSegResNetSegmenter, load_monai_config
 from img_seg.models.nnunet_v2 import (
     dataset_folder_name,
     load_nnunet_config,
@@ -40,7 +44,7 @@ from img_seg.models.nnunet_v2 import (
 DEFAULT_NNUNET_CONFIG = Path("configs/nnunet_v2/base.yaml")
 DEFAULT_OUTPUT_DIR = Path("Test_Seg")
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
-ModelKey = Literal["nnunet_v2", "efficientnet_b0"]
+ModelKey = Literal["nnunet_v2", "monai_segresnet", "efficientnet_b0"]
 InputKind = Literal["nifti", "image"]
 
 
@@ -98,6 +102,7 @@ class ResultMetrics:
 def list_available_models() -> list[ModelInfo]:
     return [
         ModelInfo(key="nnunet_v2", label="nnU-Net v2 2D"),
+        ModelInfo(key="monai_segresnet", label="MONAI SegResNet 3D"),
         ModelInfo(key="efficientnet_b0", label="EfficientNet-B0 2D U-Net"),
     ]
 
@@ -130,8 +135,17 @@ def sanitize_case_id(value: str) -> str:
     return cleaned or "case"
 
 
+def case_id_from_path(path: Path) -> str:
+    """Derive a stable case id from flat files or ``case/image.nii.gz`` layouts."""
+
+    stem = sanitize_case_id(strip_known_suffix(path))
+    if is_nifti_path(path) and stem.lower() in {"image", "volume", "mask", "label"}:
+        return sanitize_case_id(path.parent.name)
+    return stem
+
+
 def normalize_reference_case_id(path: Path) -> str:
-    case_id = sanitize_case_id(strip_known_suffix(path))
+    case_id = case_id_from_path(path)
     case_id = re.sub(r"([._-]?(seg|mask|label))$", "", case_id, flags=re.IGNORECASE)
     return sanitize_case_id(case_id)
 
@@ -185,12 +199,27 @@ def _iter_supported_files(path: Path, *, include_nifti_masks: bool) -> list[Path
         return [path] if is_nifti_path(path) or is_image_path(path) else []
     if not path.is_dir():
         raise FileNotFoundError(f"Input path does not exist: {path}")
-    files = [
-        file
-        for file in path.rglob("*")
-        if file.is_file() and is_supported(file)
-    ]
+    files = [file for file in path.rglob("*") if file.is_file() and is_supported(file)]
     return sorted(files, key=natural_sort_key)
+
+
+def _iter_reference_files(path: Path) -> list[Path]:
+    """Prefer obvious masks in a mixed case tree, but accept a labels-only directory."""
+
+    files = _iter_supported_files(path, include_nifti_masks=True)
+    if path.is_file():
+        return files
+    mask_like = [
+        file
+        for file in files
+        if _looks_like_nifti_mask(file)
+        or re.search(
+            r"(?:^|[._-])(?:seg|mask|label)(?:[._-]|$)",
+            strip_known_suffix(file),
+            flags=re.IGNORECASE,
+        )
+    ]
+    return mask_like or files
 
 
 def collect_inputs(
@@ -220,7 +249,7 @@ def collect_inputs(
     used_ids: dict[str, int] = {}
     inputs: list[InferenceInput] = []
     for path in unique:
-        base_case_id = sanitize_case_id(strip_known_suffix(path))
+        base_case_id = case_id_from_path(path)
         count = used_ids.get(base_case_id, 0)
         used_ids[base_case_id] = count + 1
         case_id = base_case_id if count == 0 else f"{base_case_id}_{count + 1}"
@@ -241,13 +270,11 @@ def collect_reference_masks(
 ) -> dict[str, Path]:
     paths: list[Path] = []
     if reference_path:
-        paths.extend(
-            _iter_supported_files(resolve_project_path(reference_path), include_nifti_masks=True)
-        )
+        paths.extend(_iter_reference_files(resolve_project_path(reference_path)))
     for uploaded in uploaded_files or []:
         path = _coerce_upload_path(uploaded)
         if path is not None:
-            paths.extend(_iter_supported_files(path, include_nifti_masks=True))
+            paths.extend(_iter_reference_files(path))
 
     references: dict[str, Path] = {}
     seen_paths: set[Path] = set()
@@ -272,6 +299,25 @@ def list_checkpoints(
     configuration: str = "2d",
     fold: str = "0",
 ) -> list[CheckpointInfo]:
+    if model_key == "monai_segresnet":
+        config = load_monai_config(config_path or DEFAULT_SEGRESNET_CONFIG)
+        checkpoint_dir = resolve_project_path(
+            deep_get(config, "training.checkpoint_dir", "checkpoints/monai_segresnet")
+        )
+        checkpoints = [*checkpoint_dir.rglob("*.pt"), *checkpoint_dir.rglob("*.pth")]
+
+        def segresnet_priority(path: Path) -> tuple[int, float, str]:
+            rank = 0 if path.stem == "best" else 1 if path.stem == "last" else 2
+            return (rank, -path.stat().st_mtime, path.name)
+
+        return [
+            CheckpointInfo(
+                label=f"{checkpoint.name} - {checkpoint.parent.name}",
+                path=checkpoint,
+                checkpoint_name=checkpoint.name,
+            )
+            for checkpoint in sorted(checkpoints, key=segresnet_priority)
+        ]
     if model_key == "efficientnet_b0":
         efficientnet_config = load_efficientnet_config(config_path or DEFAULT_EFFICIENTNET_CONFIG)
         checkpoint_dir = resolve_project_path(
@@ -366,10 +412,7 @@ def _nnunet_fold_dir(config: dict, configuration: str, fold: str) -> Path:
     )
     trainer = str(deep_get(config, "training.trainer", "nnUNetTrainer"))
     return (
-        paths.results
-        / dataset_name
-        / f"{trainer}__nnUNetPlans__{configuration}"
-        / f"fold_{fold}"
+        paths.results / dataset_name / f"{trainer}__nnUNetPlans__{configuration}" / f"fold_{fold}"
     )
 
 
@@ -631,9 +674,7 @@ def _run_nnunet_predict(
         reader.join(timeout=2)
     if process.returncode != 0:
         tail = "\n".join(output_tail)
-        raise RuntimeError(
-            f"nnUNetv2_predict failed with exit code {process.returncode}.\n{tail}"
-        )
+        raise RuntimeError(f"nnUNetv2_predict failed with exit code {process.returncode}.\n{tail}")
 
 
 def _run_efficientnet_inference(
@@ -687,6 +728,44 @@ def _run_efficientnet_inference(
     return results
 
 
+def _run_segresnet_inference(
+    *,
+    inputs: list[InferenceInput],
+    output_path: Path,
+    checkpoint_path: str | Path | None,
+    config_path: str | Path,
+    device: str | None,
+    cancel_event: threading.Event | None,
+    progress_callback: Callable[[int, int, Path], None] | None,
+) -> list[InferenceResult]:
+    if checkpoint_path is None:
+        raise ValueError("MONAI SegResNet inference requires a checkpoint path")
+    image_inputs = [item.source_path for item in inputs if item.kind == "image"]
+    if image_inputs:
+        raise ValueError("MONAI SegResNet accepts 3D .nii/.nii.gz volumes, not 2D images")
+    segmenter = MonaiSegResNetSegmenter(config_path, device=device)
+    segmenter.load(checkpoint_path)
+    results: list[InferenceResult] = []
+    for index, item in enumerate(inputs, start=1):
+        _raise_if_cancelled(cancel_event)
+        final_output = output_path / f"{item.case_id}_Seg.nii.gz"
+        prediction = segmenter.predict_volume(item.source_path, final_output)
+        results.append(
+            InferenceResult(
+                case_id=item.case_id,
+                input_kind=item.kind,
+                input_path=item.source_path,
+                output_path=Path(prediction["output_path"]),
+                elapsed_sec=float(prediction["elapsed_sec"]),
+                shape=list(prediction["shape"]),
+                status="done",
+            )
+        )
+        if progress_callback is not None:
+            progress_callback(index, len(inputs), item.source_path)
+    return results
+
+
 def run_batch_inference(
     *,
     model_key: ModelKey,
@@ -708,6 +787,16 @@ def run_batch_inference(
             output_path=output_path,
             checkpoint_path=checkpoint_path_or_name,
             config_path=config_path or DEFAULT_EFFICIENTNET_CONFIG,
+            device=device,
+            cancel_event=cancel_event,
+            progress_callback=progress_callback,
+        )
+    if model_key == "monai_segresnet":
+        return _run_segresnet_inference(
+            inputs=inputs,
+            output_path=output_path,
+            checkpoint_path=checkpoint_path_or_name,
+            config_path=config_path or DEFAULT_SEGRESNET_CONFIG,
             device=device,
             cancel_event=cancel_event,
             progress_callback=progress_callback,
@@ -790,7 +879,7 @@ def run_batch_prediction(
 ) -> list[dict[str, object]]:
     """Compatibility wrapper used by the command-line batch predictor."""
 
-    if model_key not in {"nnunet_v2", "efficientnet_b0"}:
+    if model_key not in {"nnunet_v2", "monai_segresnet", "efficientnet_b0"}:
         raise ValueError(f"Unsupported model: {model_key}")
     inputs = collect_inputs(input_dir)
     results = run_batch_inference(
