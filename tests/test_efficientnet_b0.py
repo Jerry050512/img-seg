@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 import torch
 
-from img_seg.data.cases import discover_cases
+from img_seg.data.cases import SegmentationCase, discover_cases
 from img_seg.data.slices import NiftiSliceDataset, build_slice_samples
 from img_seg.data.splits import CaseSplit, make_case_split
 from img_seg.models.efficientnet_b0 import EfficientNetB0Segmenter
@@ -19,6 +19,7 @@ from img_seg.training.efficientnet_b0_cli import (
     build_parser,
     evaluate_slice_loader,
     resolve_training_artifacts,
+    split_cases_from_config,
     timestamped_run_name,
 )
 
@@ -76,6 +77,44 @@ def test_slice_samples_preserve_case_split_and_binarize_masks(tmp_path: Path) ->
     assert {int(value) for value in torch.unique(row["mask"]).tolist()} <= {0, 1}
     assert row["image"].shape == (1, 16, 16)
     assert row["mask"].shape == (1, 16, 16)
+
+
+def test_split_cases_from_config_prefers_explicit_case_lists(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    case_ids = ["case_train", "case_val", "case_test"]
+    cases = [
+        SegmentationCase(
+            case_id=case_id,
+            image_path=tmp_path / case_id / "image.nii.gz",
+            mask_path=tmp_path / case_id / "mask.nii.gz",
+        )
+        for case_id in case_ids
+    ]
+    monkeypatch.setattr(efficientnet_b0_cli, "load_cases_from_manifest", lambda _path: cases)
+    monkeypatch.setattr(
+        efficientnet_b0_cli,
+        "load_yaml",
+        lambda _path: {
+            "strategy": "case_level",
+            "ratios": {"train": 0.7, "val": 0.15, "test": 0.15},
+            "train": ["case_train"],
+            "val": ["case_val"],
+            "test": ["case_test"],
+        },
+    )
+    config = {
+        "data": {
+            "dataset_config": str(tmp_path / "dataset.yaml"),
+            "split_file": str(tmp_path / "split.yaml"),
+        }
+    }
+
+    loaded_cases, split = split_cases_from_config(config)
+
+    assert loaded_cases == cases
+    assert split == CaseSplit(train=["case_train"], val=["case_val"], test=["case_test"])
 
 
 def test_efficientnet_segmenter_predicts_nifti_and_image(tmp_path: Path) -> None:

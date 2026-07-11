@@ -26,7 +26,7 @@ uv run imgseg-efficientnet train `
   --output-dir outputs/efficientnet_b0/runs
 ```
 
-默认读取 `dataset/`，使用 `configs/data/split_seed42.yaml` 做 case-level split，并按 `configs/efficientnet_b0/base.yaml` 中的 `data.mask_overrides` 处理重复 mask。训练样本按 z 轴切片，mask 统一执行 `mask > 0` 二值化；只有训练集会根据 keep ratio 下采样空 slice，验证集保留每个验证 case 的全部 slice。
+默认通过 `configs/data/dataset.yaml` 读取规范化后的 `dataset/`，并使用 `configs/data/split_seed42.yaml` 中的显式 case 清单做 9/2/2 划分。训练样本按 z 轴切片，mask 统一执行 `mask > 0` 二值化；只有训练集会根据 keep ratio 下采样空 slice，验证集保留每个验证 case 的全部 slice。
 
 每轮验证先在同一 case 内累计全部 slice 的 TP、FP、FN、TN，再计算该 case 的 Dice、IoU、Precision、Recall，最后对 case 做宏平均。这样不会把 slice 当成彼此独立的数据划分，也不会让大量全空 slice 直接主导 best checkpoint 的选择。训练 AMP 只会在 CUDA 设备上启用。
 

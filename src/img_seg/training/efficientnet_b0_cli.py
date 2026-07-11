@@ -17,7 +17,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from img_seg.config import deep_get, load_yaml, project_path_from_config, resolve_project_path
-from img_seg.data.cases import SegmentationCase, discover_cases
+from img_seg.data.cases import SegmentationCase, load_cases_from_manifest
 from img_seg.data.slices import NiftiSliceDataset, build_slice_samples
 from img_seg.data.splits import CaseSplit, make_case_split
 from img_seg.evaluation.metrics import binary_confusion, binary_metrics, safe_divide
@@ -59,24 +59,36 @@ class TrainingLog:
 
 
 def split_cases_from_config(config: dict[str, Any]) -> tuple[list[SegmentationCase], CaseSplit]:
-    dataset_dir = project_path_from_config(config, "data.raw_dataset_dir")
-    cases = discover_cases(
-        dataset_dir,
-        mask_overrides=deep_get(config, "data.mask_overrides", {}),
-        require_masks=True,
-    )
+    cases = load_cases_from_manifest(project_path_from_config(config, "data.dataset_config"))
+    if any(case.mask_path is None for case in cases):
+        raise ValueError("Every EfficientNet-B0 training case must have a mask")
     split_config = load_yaml(project_path_from_config(config, "data.split_file"))
     strategy = str(split_config.get("strategy", "case_level"))
     if strategy != "case_level":
         raise ValueError(f"Unsupported split strategy: {strategy}")
-    ratios = split_config.get("ratios", {})
-    split = make_case_split(
-        [case.case_id for case in cases],
-        seed=int(split_config.get("seed", 42)),
-        train_ratio=float(ratios.get("train", 0.7)),
-        val_ratio=float(ratios.get("val", 0.15)),
-        test_ratio=float(ratios.get("test", 0.15)),
-    )
+    split_keys = ("train", "val", "test")
+    if all(isinstance(split_config.get(key), list) for key in split_keys):
+        split = CaseSplit(**{key: list(split_config[key]) for key in split_keys})
+    else:
+        ratios = split_config.get("ratios", {})
+        split = make_case_split(
+            [case.case_id for case in cases],
+            seed=int(split_config.get("seed", 42)),
+            train_ratio=float(ratios.get("train", 0.7)),
+            val_ratio=float(ratios.get("val", 0.15)),
+            test_ratio=float(ratios.get("test", 0.15)),
+        )
+
+    available_ids = {case.case_id for case in cases}
+    assigned_ids = [*split.train, *split.val, *split.test]
+    unknown_ids = sorted(set(assigned_ids) - available_ids)
+    if unknown_ids:
+        raise ValueError(f"Split contains unknown case ids: {unknown_ids}")
+    if len(assigned_ids) != len(set(assigned_ids)):
+        raise ValueError("A case id appears in more than one split")
+    missing_ids = sorted(available_ids - set(assigned_ids))
+    if missing_ids:
+        raise ValueError(f"Split does not assign every dataset case: {missing_ids}")
     return cases, split
 
 

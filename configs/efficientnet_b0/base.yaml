@@ -4,11 +4,8 @@ task:
   type: binary_segmentation
   input_format: 2d_slices
 data:
-  raw_dataset_dir: dataset
+  dataset_config: configs/data/dataset.yaml
   split_file: configs/data/split_seed42.yaml
-  mask_overrides:
-    1_23_XY: 1_23_XY.Seg.nii
-    S_1: S-1-Seg.nii
   slice_axis: z
   image_size: [512, 512]
   foreground_slice_keep_ratio: 1.0
