@@ -37,6 +37,7 @@ dev = [
 imgseg-audit-nifti = "img_seg.data.audit_cli:main"
 imgseg-efficientnet = "img_seg.training.efficientnet_b0_cli:main"
 imgseg-nnunet = "img_seg.training.nnunet_v2_cli:main"
+imgseg-segresnet = "img_seg.training.monai_segresnet_cli:main"
 imgseg-nnunet-report = "img_seg.evaluation.nnunet_report:main"
 imgseg-predict = "img_seg.inference.cli:main"
 imgseg-visualize-overlay = "img_seg.evaluation.visualize:main"
