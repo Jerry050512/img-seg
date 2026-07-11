@@ -46,6 +46,8 @@ uv sync
 - 数据集盘点：[docs/DATASET_AUDIT.md](docs/DATASET_AUDIT.md)
 - 项目结构：[docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)
 - nnU-Net v2 工作流：[docs/NNUNET_V2_WORKFLOW.md](docs/NNUNET_V2_WORKFLOW.md)
+- EfficientNet-B0 工作流：[docs/EFFICIENTNET_B0_WORKFLOW.md](docs/EFFICIENTNET_B0_WORKFLOW.md)
+- MONAI SegResNet 工作流：[docs/MONAI_SEGRESNET_WORKFLOW.md](docs/MONAI_SEGRESNET_WORKFLOW.md)
 - 模型调研与推荐：[docs/MODEL_RESEARCH.md](docs/MODEL_RESEARCH.md)
 - 三人协作规范：[docs/COLLABORATION.md](docs/COLLABORATION.md)
 - 贡献指南：[CONTRIBUTING.md](CONTRIBUTING.md)
@@ -58,7 +60,10 @@ uv sync
 ```powershell
 uv run python utils/audit_nifti.py dataset --labels
 uv run imgseg-nnunet --config configs/nnunet_v2/base.yaml prepare
+uv run imgseg-segresnet --config configs/monai_segresnet/base.yaml inspect
 uv run python utils/compress_nii.py dataset --recursive
+uv run imgseg-efficientnet train --config configs/efficientnet_b0/base.yaml
+uv run imgseg-predict --model efficientnet_b0 --checkpoint checkpoints/efficientnet_b0/20260710T083015123456Z/best.pth --input-dir Test --output-dir Test_Seg
 ```
 
 ## WebUI
@@ -67,8 +72,9 @@ uv run python utils/compress_nii.py dataset --recursive
 uv run imgseg-webui
 ```
 
-WebUI 支持选择 nnU-Net v2 权重，对单个 NIfTI、NIfTI 文件夹、单张 `.jpg/.png` 或图片文件夹进行批量推理。默认输出目录为 `Test_Seg`，NIfTI 输出 `.nii.gz` 二值 mask，2D 图片输出同名 `.png` 二值 mask。
-普通图片会先按单通道单 slice 转为临时 NIfTI，并使用 identity affine，因此结果只表达像素空间分割，不包含真实物理间距。
+WebUI 通过公共批量推理接口提供 `nnU-Net v2` 与 `EfficientNet-B0 2D U-Net` 模型选择，并按所选模型列出可用 checkpoint；也可以手动填写权重路径。输入支持单个文件或文件夹中的 NIfTI，以及 `.jpg`、`.jpeg`、`.png`、`.bmp`、`.tif`、`.tiff` 图片。默认输出目录为 `Test_Seg`，NIfTI 输出 `.nii.gz` 二值 mask，2D 图片输出同名 `.png` 二值 mask。
+
+普通图片只表达像素空间分割，不包含真实物理间距。选择 nnU-Net v2 时，图片会先按单通道单 slice 转为使用 identity affine 的临时 NIfTI；选择 EfficientNet-B0 时，图片按灰度 2D 输入直接预测。
 
 ## 社区与许可
 

@@ -21,3 +21,8 @@ class Segmenter(Protocol):
 
     def predict_volume(self, image_path: str | Path, output_path: str | Path) -> PredictionResult:
         """Predict a binary segmentation mask for one volume."""
+
+
+class ImageSegmenter(Protocol):
+    def predict_image(self, image_path: str | Path, output_path: str | Path) -> PredictionResult:
+        """Predict a binary segmentation mask for one 2D image."""

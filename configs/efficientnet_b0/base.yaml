@@ -18,14 +18,26 @@ model:
   in_channels: 1
   classes: 1
 training:
+  seed: 42
   epochs: 100
   batch_size: 8
   amp: true
   optimizer: adamw
   learning_rate: 0.0003
+  weight_decay: 0.01
   loss: dice_bce
+  log_file: outputs/efficientnet_b0/train.log
+runtime:
+  device: auto
+  num_workers: 0
+  nifti_cache_size: 8
+checkpoints:
+  output_dir: checkpoints/efficientnet_b0
+  best: checkpoints/efficientnet_b0/best.pth
 inference:
   threshold: 0.5
+  batch_size: 8
+  amp: true
   output_dir: outputs/efficientnet_b0
 notes:
   - This is the lightweight/WebUI-friendly baseline.

@@ -15,6 +15,7 @@ from img_seg.inference.batch import (
     list_checkpoints,
     make_preview,
     run_batch_inference,
+    run_batch_prediction,
 )
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "list_checkpoints",
     "make_preview",
     "run_batch_inference",
+    "run_batch_prediction",
 ]

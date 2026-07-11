@@ -29,7 +29,11 @@ from img_seg.inference import (
 )
 
 APP_TITLE = "ImgSeg WebUI"
-DEFAULT_CONFIG = "configs/nnunet_v2/base.yaml"
+DEFAULT_MODEL = "nnunet_v2"
+DEFAULT_CONFIGS = {
+    "nnunet_v2": "configs/nnunet_v2/base.yaml",
+    "efficientnet_b0": "configs/efficientnet_b0/base.yaml",
+}
 WEBUI_PROGRESS = gr.Progress(track_tqdm=True)
 WEBUI_CANCEL_EVENTS: dict[str, threading.Event] = {}
 WEBUI_CANCEL_LOCK = threading.Lock()
@@ -133,13 +137,26 @@ def _model_choices() -> list[tuple[str, str]]:
     return [(model.label, model.key) for model in list_available_models() if model.runnable]
 
 
-def _checkpoint_choices() -> list[tuple[str, str]]:
-    return [(checkpoint.label, str(checkpoint.path)) for checkpoint in list_checkpoints()]
+def _config_for_model(model_key: str) -> str:
+    try:
+        return DEFAULT_CONFIGS[model_key]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported model: {model_key}") from exc
 
 
-def _default_checkpoint() -> str:
-    checkpoints = _checkpoint_choices()
-    return checkpoints[0][1] if checkpoints else ""
+def _checkpoint_choices(model_key: str = DEFAULT_MODEL) -> list[tuple[str, str]]:
+    return [
+        (checkpoint.label, str(checkpoint.path))
+        for checkpoint in list_checkpoints(
+            model_key=model_key,
+            config_path=_config_for_model(model_key),
+        )
+    ]
+
+
+def _default_checkpoint(model_key: str = DEFAULT_MODEL) -> str | None:
+    checkpoints = _checkpoint_choices(model_key)
+    return checkpoints[0][1] if checkpoints else None
 
 
 def _result_rows(results: list[dict[str, Any]]) -> list[list[Any]]:
@@ -222,7 +239,7 @@ def _remove_cancel_event(cancel_token: str) -> None:
 
 def run_inference_ui(
     model_key: str,
-    checkpoint_dropdown: str,
+    checkpoint_dropdown: str | None,
     checkpoint_path: str,
     local_input_path: str,
     uploaded_files: list[object] | None,
@@ -261,24 +278,33 @@ def run_inference_ui(
         progress(0.05, desc="Collecting inputs")
         inputs = collect_inputs(local_input_path.strip() or None, uploads)
         input_summary = ", ".join(f"{item.case_id}({item.kind})" for item in inputs)
+        model_label = next(
+            (model.label for model in list_available_models() if model.key == model_key),
+            model_key,
+        )
         yield (
             [],
             [],
-            f"已加入 {len(inputs)} 个样本：{input_summary}\n正在启动 nnU-Net 推理，"
-            "首次加载模型通常需要 1-3 分钟...",
+            f"已加入 {len(inputs)} 个样本：{input_summary}\n正在启动 {model_label} 推理...",
             gr.update(choices=[], value=None),
             [],
             None,
             cancel_token,
         )
-        progress(0.25, desc="Running nnU-Net prediction")
+        progress(0.25, desc=f"Running {model_label} prediction")
+
+        def report_file_progress(index: int, total: int, path: Path) -> None:
+            fraction = 0.25 + 0.65 * index / max(total, 1)
+            progress(fraction, desc=f"Predicting {path.name} ({index}/{total})")
+
         results = run_batch_inference(
             model_key=model_key,
             inputs=inputs,
             checkpoint_path_or_name=checkpoint or None,
             output_dir=output_dir.strip() or DEFAULT_OUTPUT_DIR,
-            config_path=DEFAULT_CONFIG,
+            config_path=_config_for_model(model_key),
             cancel_event=cancel_event,
+            progress_callback=report_file_progress,
         )
     except InferenceCancelledError as exc:
         _remove_cancel_event(cancel_token)
@@ -355,7 +381,7 @@ def stop_inference_ui(cancel_token: str | None) -> str:
     if event is None:
         return "没有正在运行的推理任务。"
     event.set()
-    return "已请求终止推理，正在停止 nnU-Net 进程..."
+    return "已请求终止推理，正在停止当前任务..."
 
 
 def open_output_dir_ui(output_dir: str) -> str:
@@ -431,10 +457,10 @@ def preview_result_ui(
     return str(preview), f"{result['case_id']} -> {result['output_path']}"
 
 
-def refresh_checkpoints_ui() -> tuple[dict[str, Any], str]:
-    choices = _checkpoint_choices()
-    value = choices[0][1] if choices else ""
-    return gr.update(choices=choices, value=value), value
+def refresh_checkpoints_ui(model_key: str) -> tuple[dict[str, Any], str]:
+    choices = _checkpoint_choices(model_key)
+    value = choices[0][1] if choices else None
+    return gr.update(choices=choices, value=value), value or ""
 
 
 def make_theme() -> gr.themes.ThemeClass:
@@ -455,7 +481,7 @@ def build_app() -> gr.Blocks:
                 """
                 <div id="imgseg-header">
                   <h1>ImgSeg WebUI</h1>
-                  <p>nnU-Net v2 batch inference for NIfTI and 2D images</p>
+                  <p>Selectable batch inference for NIfTI and 2D images</p>
                 </div>
                 """
             )
@@ -464,19 +490,19 @@ def build_app() -> gr.Blocks:
                     model = gr.Dropdown(
                         label="模型",
                         choices=_model_choices(),
-                        value="nnunet_v2",
+                        value=DEFAULT_MODEL,
                         interactive=True,
                     )
                     checkpoint_dropdown = gr.Dropdown(
                         label="权重",
-                        choices=_checkpoint_choices(),
-                        value=_default_checkpoint(),
+                        choices=_checkpoint_choices(DEFAULT_MODEL),
+                        value=_default_checkpoint(DEFAULT_MODEL),
                         interactive=True,
                     )
                     checkpoint_path = gr.Textbox(
                         label="权重路径",
-                        value=_default_checkpoint(),
-                        placeholder="checkpoint_final.pth 或完整 .pth 路径",
+                        value=_default_checkpoint(DEFAULT_MODEL) or "",
+                        placeholder="完整 .pth 或 .pt checkpoint 路径",
                     )
                     refresh_checkpoints = gr.Button("刷新权重", variant="secondary")
                     local_input_path = gr.Textbox(
@@ -486,12 +512,30 @@ def build_app() -> gr.Blocks:
                     uploaded_files = gr.File(
                         label="上传文件",
                         file_count="multiple",
-                        file_types=[".nii", ".nii.gz", ".png", ".jpg", ".jpeg"],
+                        file_types=[
+                            ".nii",
+                            ".nii.gz",
+                            ".png",
+                            ".jpg",
+                            ".jpeg",
+                            ".bmp",
+                            ".tif",
+                            ".tiff",
+                        ],
                     )
                     uploaded_directory = gr.File(
                         label="上传文件夹",
                         file_count="directory",
-                        file_types=[".nii", ".nii.gz", ".png", ".jpg", ".jpeg"],
+                        file_types=[
+                            ".nii",
+                            ".nii.gz",
+                            ".png",
+                            ".jpg",
+                            ".jpeg",
+                            ".bmp",
+                            ".tif",
+                            ".tiff",
+                        ],
                     )
                     reference_path = gr.Textbox(
                         label="Reference mask 路径",
@@ -500,12 +544,30 @@ def build_app() -> gr.Blocks:
                     reference_files = gr.File(
                         label="上传 reference mask",
                         file_count="multiple",
-                        file_types=[".nii", ".nii.gz", ".png", ".jpg", ".jpeg"],
+                        file_types=[
+                            ".nii",
+                            ".nii.gz",
+                            ".png",
+                            ".jpg",
+                            ".jpeg",
+                            ".bmp",
+                            ".tif",
+                            ".tiff",
+                        ],
                     )
                     reference_directory = gr.File(
                         label="上传 reference 文件夹",
                         file_count="directory",
-                        file_types=[".nii", ".nii.gz", ".png", ".jpg", ".jpeg"],
+                        file_types=[
+                            ".nii",
+                            ".nii.gz",
+                            ".png",
+                            ".jpg",
+                            ".jpeg",
+                            ".bmp",
+                            ".tif",
+                            ".tiff",
+                        ],
                     )
                     with gr.Row():
                         output_dir = gr.Textbox(
@@ -602,9 +664,19 @@ def build_app() -> gr.Blocks:
 
             refresh_checkpoints.click(
                 refresh_checkpoints_ui,
+                inputs=model,
                 outputs=[checkpoint_dropdown, checkpoint_path],
             )
-            checkpoint_dropdown.change(lambda value: value, checkpoint_dropdown, checkpoint_path)
+            model.change(
+                refresh_checkpoints_ui,
+                inputs=model,
+                outputs=[checkpoint_dropdown, checkpoint_path],
+            )
+            checkpoint_dropdown.change(
+                lambda value: value or "",
+                checkpoint_dropdown,
+                checkpoint_path,
+            )
             run_event = run_button.click(
                 run_inference_ui,
                 inputs=[
