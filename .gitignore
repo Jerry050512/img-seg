@@ -30,6 +30,10 @@ dataset/**/*.nii
 dataset/**/*.nii.gz
 dataset/processed/
 
+*.local.*
+docs/course_report/cover.pdf
+output/pdf/img-seg-course-report.pdf
+
 # OS/editor
 .DS_Store
 Thumbs.db
