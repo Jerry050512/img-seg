@@ -40,7 +40,7 @@ Bash 用户可用 `mkdir -p output/pdf` 创建输出目录。Typst 通常会自�
 
 - 英文正文使用 `Libertinus Serif`。
 - 中文正文保留项目原定回退路线：`LXGW WenKai -> Songti SC -> Source Han Serif -> SimSun -> Microsoft YaHei`，并在末尾追加 Linux 常见的 `Noto Serif CJK SC/JP`。
-- 标题/图表采用 `LXGW WenKai -> Microsoft YaHei -> Noto Sans CJK SC/JP -> DejaVu Sans`；代码字体采用 `Consolas -> DejaVu Sans Mono`，英文正文使用 `Libertinus Serif`。
+- 标题采用 `LXGW WenKai -> Microsoft YaHei -> Noto Sans CJK SC/JP -> DejaVu Sans`；Python 图表优先使用 `Microsoft YaHei` 等无衬线黑体，代码字体采用 `Consolas -> DejaVu Sans Mono`，英文正文使用 `Libertinus Serif`。
 
 Python 绘图脚本按同一跨平台候选顺序选择本机实际存在的字体。安装或更新字体后，建议用 `typst fonts` 确认字体族名称，再重启长期运行的 Tinymist/Typst watch 进程并重新编译；语言服务器会缓存启动时的字体清单。Typst 对 fallback 列表中未安装的候选字体可能给出 warning，但会继续使用首个可用字体。
 
@@ -48,8 +48,6 @@ Python 绘图脚本按同一跨平台候选顺序选择本机实际存在的字�
 
 - 三位成员的真实姓名与学号、最终工作量比例。
 - 三个最佳 checkpoint 的外部存储链接。
-- 将 SegResNet 注册到统一 batch inference 与 WebUI 模型下拉框。
-- 如需严格横向排名，在同一测试 case 与同一 GPU 上重新评估 EfficientNet 和三模型速度。
 
 三模型现有实验结果已写入正文。EfficientNet 的 mIoU/Accuracy 为由公开的四舍五入逐例指标与数据审计前景比例近似恢复的值，测试第二例也与另外两模型不同；正文和 `assets/model_comparison.json` 均明确记录该限制。其 6.250893 M 参数与 23.5836 GFLOPs 来自当前配置实际模型和 $512 times 512$ 单通道输入，原始统计保存在 `assets/efficientnet_b0_complexity.json`。
 

@@ -324,20 +324,9 @@ uv run imgseg-webui
 当前 WebUI 已统一接入三个模型。公共输入收集器同时修正了 `case/image.nii.gz` 布局的 case id 推导，使其能与同目录 `mask.nii.gz` 正确配对。针对 Gradio 只按最后一段后缀校验、从而把合法 `.nii.gz` 误判为不支持 `.gz` 的上传问题，界面层改为接受通用文件，再由后端统一 allowlist 校验完整复合后缀；模型切换只改变配置、checkpoint 枚举和批处理后端，不改变界面与评价逻辑。
 
 #figure(
-  block(
-    width: 100%,
-    height: 72mm,
-    stroke: (paint: blue, thickness: 0.8pt, dash: "dashed"),
-    radius: 4pt,
-    inset: 12pt,
-    align(center + horizon)[
-      #text(fill: muted, size: 11pt)[WebUI 最终验收截图预留区]
-      #v(4pt)
-      #text(fill: muted, size: 8.5pt)[建议展示：三模型下拉框、`.nii.gz` 上传列表、批量进度、指标表和 mask 预览]
-    ],
-  ),
-  caption: [WebUI 展示版面；最终提交前替换为验收环境截图],
-) <fig:webui-placeholder>
+  image("assets/web-ui.png", width: 100%),
+  caption: [WebUI 实际运行界面：选择 MONAI SegResNet 3D 和 `best.pt`，上传 `.nii.gz` 图像与参考 mask，完成推理后展示运行状态、逐例结果、指标区域和分割预览。],
+) <fig:webui>
 
 = 实验结果与对比分析
 
@@ -425,8 +414,6 @@ best 在所有主要宏平均指标上均优于 final：Dice 提高 0.0073，二
 SegResNet 的测试 Dice 比验证 Dice 高 0.1294。该差距由两个极小集合的样本构成差异造成：验证中的 `1_23_XY` 仅 0.7785，而测试中的 `S_3` 达到 0.9769。它在两个测试 case 上都超过 0.93，说明结果并非只由单例抬高；但每组仅 2 例，仍不足以估计稳定泛化性能。文件名族如 `S_1/S_3/S_4/S_5`、`nose_layer*` 是否来自同一对象也需要原始元数据确认，否则 case-level split 仍可能低估 subject-level 相关性。
 
 === EfficientNet-B0 测试基线
-
-本机合入两次格式一致的新式 timestamp run：2026-07-10 的 100-epoch run（`20260710T152124825334Z`）测试 Dice 0.9065、IoU 0.8313、Precision 0.9281、Recall 0.8878；时间更新的 2026-07-11 30-epoch run（`20260711T031117144692Z`）对应为 0.9023、0.8248、0.9332、0.8755。后一次虽时间更新但综合重叠指标更低，因此最终横向对比仍选择前一次的最佳 checkpoint；两次日志与指标均保留在实验记录中，避免以文件时间替代验证/测试证据进行模型选择。
 
 #table(
   columns: (1.2fr, 1.2fr, 0.8fr, 0.8fr, 0.85fr, 0.85fr, 0.9fr),
@@ -543,28 +530,55 @@ EfficientNet 在大尺寸 `2_25_XY` 上 Recall 0.8208，说明逐 slice 轻量�
 
 该例总体重叠较高，但 FP 集中于目标外部且具有连续形态，说明模型把跨切片持续出现的相似纹理也解释为前景。后续可在验证集上评估最大连通域、边界损失或困难负样本采样；任何规则确定后都必须冻结，再用于测试集。
 
-= 工程实现、复现性与风险控制
+= 项目代码文件与功能介绍
 
-== 公共模块与模型边界
+项目采用 `src` layout，将课程验收入口、公共数据与评价逻辑、模型私有实现和界面层分开。根目录脚本面向助教直接运行，`src/img_seg/` 提供可复用实现，所有模型通过同一批量推理接口输出二值 mask。
 
-项目采用 `src` layout。数据发现与 split 位于 `src/img_seg/data/`，NIfTI I/O 位于 `src/img_seg/io/`，混淆矩阵与指标位于 `src/img_seg/evaluation/`，批量推理位于 `src/img_seg/inference/`，WebUI 只依赖统一 inference 层。模型私有实现位于 `src/img_seg/models/` 或 nnU-Net trainer 扩展目录。
+== 课程交付入口文件
 
-这种分层避免每个模型复制一套数据读取、评价和输出命名，从而保证三模型对比口径一致。配置文件、代码、报告素材和大体积训练产物分离；原始 NIfTI、checkpoint 与 outputs 不提交 Git。
+#table(
+  columns: (0.28fr, 0.72fr),
+  fill: (x, y) => if y == 0 { navy } else if calc.odd(y) { paper-blue } else { white },
+  table-head[文件], table-head[功能],
+  table-text[`train.py`], table-text[三模型统一训练入口；接收模型、配置、数据、epoch、设备与断点参数，并把任务分派给对应训练后端。],
+  table-text[`test.py`], table-text[批量预测与评估入口；读取测试图像和可选参考 mask，统一计算 Dice、IoU、Precision、Recall 与耗时，末行输出 JSON。],
+  table-text[`predict.py`], table-text[助教单文件推理入口；也支持目录批处理，按输入类型写出 `.nii.gz` 二值 mask 或 PNG 预览。],
+  table-text[`README.md`], table-text[给出环境同步、权重放置以及训练、测试、单图推理和 WebUI 的可复制命令。],
+  table-text[`pyproject.toml` / `uv.lock`], table-text[声明 Python 依赖、命令行入口并锁定环境；`requirements.txt` 仅作为 deprecated 兼容方案，不作为环境维护来源。],
+)
 
-== 可复现性控制
+== 核心源码模块
 
-- 环境通过 `uv.lock` 固定，依赖只写入 `pyproject.toml`；
-- split 文件固定 seed=42 且采用 case-level strategy；
-- 所有二分类 mask 统一执行 `mask > 0`；
-- nnU-Net 实验保留 run id、debug、plans、epoch CSV、checkpoint 与 runtime JSON；
-- SegResNet 保留 200 epoch history、best/last checkpoint、prediction manifest 与逐 case 混淆矩阵；
-- 三模型对比数值及口径写入 `assets/model_comparison.json`，图表可由脚本重新生成；EfficientNet 的 100/30-epoch 两次 timestamp run 均在实验记录中保留，横表采用 Dice 更高的 100-epoch run；
-- 测试输出保留原 reference shape 和 affine；
-- 图表由 `docs/course_report/generate_assets.py` 从原始指标和 NIfTI 重新生成。
+#table(
+  columns: (0.34fr, 0.66fr),
+  fill: (x, y) => if y == 0 { navy } else if calc.odd(y) { paper-blue } else { white },
+  table-head[文件或目录], table-head[功能],
+  table-text[`src/img_seg/config.py`], table-text[读取 YAML 配置、解析项目相对路径，并为各模型提供一致的配置访问方式。],
+  table-text[`src/img_seg/course_delivery.py`], table-text[连接根目录三个交付脚本与内部模块，完成参数兼容、临时数据配置、训练分派、预测评价和交付产物写出。],
+  table-text[`data/cases.py`、`slices.py`、`splits.py`], table-text[发现 NIfTI case、构建 2D slice 数据集并执行固定 seed 的 case-level 划分；`audit_cli.py` 提供数据审计命令。],
+  table-text[`io/nifti.py`], table-text[负责 NIfTI 读取、二值 mask 保存及 shape、affine/header 等空间信息保持。],
+  table-text[`evaluation/metrics.py`], table-text[基于混淆矩阵统一实现 Dice、IoU、Precision、Recall 与 Accuracy；报告和 WebUI 共用同一评价口径。],
+  table-text[`evaluation/nnunet_report.py`、`visualize.py`], table-text[汇总 nnU-Net 训练/测试日志，并生成分割叠加图和误差可视化。],
+  table-text[`models/base.py`], table-text[定义公共模型协议与预测结果结构，隔离上层推理代码和具体网络实现。],
+  table-text[`models/nnunet_v2.py`、`monai_segresnet.py`、`efficientnet_b0.py`], table-text[分别封装三条模型线的命令、网络构建、权重加载和单例推理逻辑。],
+  table-text[`training/*_cli.py`、`training/monai_segresnet.py`], table-text[实现三个模型的训练命令；其中 SegResNet 模块包含 patch 采样、AMP 训练、验证和断点恢复。],
+  table-text[`nnunet_ext_trainers/training_length.py`], table-text[提供课程实验使用的 200-epoch nnU-Net Trainer 扩展。],
+  table-text[`inference/batch.py`、`inference/cli.py`], table-text[收集 NIfTI/普通图片输入、枚举 checkpoint、调用三模型、支持取消与进度回调、二值化输出、计算指标并生成预览。],
+  table-text[`webui/app.py`], table-text[构建 Gradio 页面；仅调用统一 inference 接口，实现模型/权重选择、上传、批量进度、结果表、指标和预览。],
+)
 
-== 已知风险
+== 配置、工具与测试
 
-小样本是当前最主要的统计风险。两个测试 case 无法覆盖全部形态变化，0.95 左右的均值也不能给出稳定置信区间。文件名族可能对应同一对象的不同扫描或层级，仅按 case id 划分仍存在 subject-level 相关性风险。其次，EfficientNet 使用了不同的第二测试 case，三模型又运行在不同 GPU，当前精度与速度表不是严格受控排名。再次，Accuracy 受背景比例影响，不应取代 Dice/mIoU。最后，标注流程元数据与 EfficientNet 原始混淆矩阵不完整，会影响复现和误差归因。
+#table(
+  columns: (0.34fr, 0.66fr),
+  fill: (x, y) => if y == 0 { navy } else if calc.odd(y) { paper-blue } else { white },
+  table-head[文件或目录], table-head[功能],
+  table-text[`configs/data/`], table-text[记录数据根目录、标签规则以及 seed=42 的 train/validation/test case 清单。],
+  table-text[`configs/<model>/base.yaml`], table-text[分别保存 nnU-Net、SegResNet 与 EfficientNet 的训练、推理和输出参数。],
+  table-text[`utils/`], table-text[放置 NIfTI 审计、压缩、原始目录标准化与 nnU-Net 低内存预处理等独立工具。],
+  table-text[`tests/`], table-text[覆盖数据划分、公共指标、三模型适配、批量推理、课程交付脚本和 WebUI `.nii.gz` 上传回归。],
+  table-text[`docs/course_report/`], table-text[保存 Typst 报告、参考文献、实验 JSON、绘图脚本和最终图表素材。],
+)
 
 = 个人理解、实验体会与总结
 
@@ -581,8 +595,6 @@ EfficientNet 在大尺寸 `2_25_XY` 上 Recall 0.8208，说明逐 slice 轻量�
 == 实验结论
 
 本项目已经完成数据规范化、case-level 划分、三模型训练与整例测试、模型复杂度统计、定性误差分析和批量推理界面主体。共同测试集上，SegResNet 取得 Dice 0.9555 与 mIoU 0.9269，略高于 nnU-Net 的 0.9490 与 0.9192；nnU-Net Precision 0.9581 更高，预测更保守。EfficientNet 在其分支测试集上取得 Dice 0.9065，未达到 0.92 目标，但保持较短的 11.16 s/case 端到端时间。现有证据说明：3D 上下文有助于本任务的弱边界和跨层连续性，自配置 nnU-Net 是稳定强基线，轻量 2D 模型更适合速度优先场景。
-
-上述结论仍受每个验证/测试集合仅 2 case、EfficientNet 测试 case 不一致和跨硬件计时影响，不能外推为总体性能排序。
 
 #pagebreak()
 = 参考文献

@@ -30,14 +30,12 @@ cjk_font = next(
     (
         name
         for name in (
-            "LXGW WenKai",
-            "Songti SC",
-            "Source Han Serif",
-            "SimSun",
             "Microsoft YaHei",
-            "Noto Serif CJK SC",
             "Noto Sans CJK SC",
             "Noto Sans CJK JP",
+            "Source Han Sans SC",
+            "SimHei",
+            "LXGW WenKai",
             "DejaVu Sans",
         )
         if name in available_fonts
