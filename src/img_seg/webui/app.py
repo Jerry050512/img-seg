@@ -30,6 +30,11 @@ from img_seg.inference import (
 
 APP_TITLE = "ImgSeg WebUI"
 DEFAULT_MODEL = "nnunet_v2"
+# Gradio validates only the last suffix of compound extensions, so allowing
+# explicit ".nii.gz" values rejects valid uploads as ".gz" before our callback.
+# Accept generic files at the widget boundary and enforce the real allowlist in
+# collect_inputs/collect_reference_masks, which understands compound suffixes.
+UPLOAD_FILE_TYPES = ["file"]
 DEFAULT_CONFIGS = {
     "nnunet_v2": "configs/nnunet_v2/base.yaml",
     "monai_segresnet": "configs/monai_segresnet/base.yaml",
@@ -356,11 +361,7 @@ def run_inference_ui(
     done = sum(1 for result in result_dicts if result["status"] == "done")
     failed = len(result_dicts) - done
     resolved_output_dir = Path(output_dir or DEFAULT_OUTPUT_DIR).resolve()
-    log = (
-        f"完成：{done}，失败：{failed}\n"
-        f"{metrics_summary}\n"
-        f"输出目录：{resolved_output_dir}"
-    )
+    log = f"完成：{done}，失败：{failed}\n{metrics_summary}\n输出目录：{resolved_output_dir}"
     choices = _result_choices(result_dicts)
     _remove_cancel_event(cancel_token)
     yield (
@@ -513,30 +514,12 @@ def build_app() -> gr.Blocks:
                     uploaded_files = gr.File(
                         label="上传文件",
                         file_count="multiple",
-                        file_types=[
-                            ".nii",
-                            ".nii.gz",
-                            ".png",
-                            ".jpg",
-                            ".jpeg",
-                            ".bmp",
-                            ".tif",
-                            ".tiff",
-                        ],
+                        file_types=UPLOAD_FILE_TYPES,
                     )
                     uploaded_directory = gr.File(
                         label="上传文件夹",
                         file_count="directory",
-                        file_types=[
-                            ".nii",
-                            ".nii.gz",
-                            ".png",
-                            ".jpg",
-                            ".jpeg",
-                            ".bmp",
-                            ".tif",
-                            ".tiff",
-                        ],
+                        file_types=UPLOAD_FILE_TYPES,
                     )
                     reference_path = gr.Textbox(
                         label="Reference mask 路径",
@@ -545,30 +528,12 @@ def build_app() -> gr.Blocks:
                     reference_files = gr.File(
                         label="上传 reference mask",
                         file_count="multiple",
-                        file_types=[
-                            ".nii",
-                            ".nii.gz",
-                            ".png",
-                            ".jpg",
-                            ".jpeg",
-                            ".bmp",
-                            ".tif",
-                            ".tiff",
-                        ],
+                        file_types=UPLOAD_FILE_TYPES,
                     )
                     reference_directory = gr.File(
                         label="上传 reference 文件夹",
                         file_count="directory",
-                        file_types=[
-                            ".nii",
-                            ".nii.gz",
-                            ".png",
-                            ".jpg",
-                            ".jpeg",
-                            ".bmp",
-                            ".tif",
-                            ".tiff",
-                        ],
+                        file_types=UPLOAD_FILE_TYPES,
                     )
                     with gr.Row():
                         output_dir = gr.Textbox(
@@ -577,17 +542,11 @@ def build_app() -> gr.Blocks:
                             scale=3,
                         )
                         with gr.Column(scale=1, min_width=150):
-                            open_output_button = gr.Button(
-                                "打开输出文件夹", variant="secondary"
-                            )
-                            clear_output_button = gr.Button(
-                                "清理输出文件夹", variant="secondary"
-                            )
+                            open_output_button = gr.Button("打开输出文件夹", variant="secondary")
+                            clear_output_button = gr.Button("清理输出文件夹", variant="secondary")
                     confirm_clear = gr.Checkbox(label="确认清理输出", value=False)
                     with gr.Row():
-                        run_button = gr.Button(
-                            "开始推理", variant="primary", elem_id="imgseg-run"
-                        )
+                        run_button = gr.Button("开始推理", variant="primary", elem_id="imgseg-run")
                         stop_button = gr.Button(
                             "终止推理", variant="secondary", elem_id="imgseg-stop"
                         )

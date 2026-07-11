@@ -20,6 +20,8 @@
 
 nnU-Net v2、MONAI SegResNet 和 EfficientNet-B0 U-Net 的测试宏平均 Dice 分别为 0.9490、0.9555 和 0.9065；前两者在共同测试 case `2_25_XY` 与 `S_3` 上评估，均超过课程提出的 0.92 目标。SegResNet 以 4.70M 参数取得最高 Dice、二类 mIoU 0.9269 和 Recall 0.9650，说明 3D 上下文对连续体数据有效；nnU-Net 的 Accuracy 0.9587 与 Precision 0.9581 略占优势，体现更保守的前景判定。
 
+本项目代码已经开源在 #link("https://github.com/Jerry050512/img-seg").
+
 
 
 #v(0.45cm)
@@ -36,22 +38,19 @@ nnU-Net v2、MONAI SegResNet 和 EfficientNet-B0 U-Net 的测试宏平均 Dice �
 
 #heading(level: 1, numbering: none)[项目分工]
 
-表中工作量为当前报告阶段的暂定比例，合计 100%。由于本地材料未包含真实姓名和学号，相关字段明确标为待补充；提交前应由组员共同确认身份信息和工作量比例。
-
 #figure(
   table(
-  columns: (0.85fr, 1.2fr, 1fr, 2.65fr, 0.8fr),
+  columns: 4,
   fill: (x, y) => if y == 0 { navy } else if calc.odd(y) { paper-blue } else { white },
-  table-head[学号], table-head[姓名/账号], table-head[角色], table-head[主要负责内容], table-head[工作量],
-  table-text[#placeholder[待补充]], table-text[#raw("@Jerry050512")], table-text[负责人 A], table-text[nnU-Net v2 全流程、统一推理链路与 WebUI 开发；课程报告整合], table-text[40%（暂定）],
-  table-text[#placeholder[待补充]], table-text[#raw("@flypigff")], table-text[负责人 B], table-text[MONAI SegResNet 的 3D patch 训练、推理与结果分析], table-text[30%（暂定）],
-  table-text[#placeholder[待补充]], table-text[#raw("@NH-5")], table-text[负责人 C], table-text[EfficientNet-B0 编码器的 2D U-Net 训练、推理与结果分析], table-text[30%（暂定）],
+  table-head[学号], table-head[姓名/账号], table-head[主要负责内容], table-head[工作量],
+  table-text[#placeholder[待补充]], table-text[#raw("@Jerry050512")], table-text[nnU-Net v2 全流程、统一推理链路与 WebUI 开发；课程报告整合], table-text[40%],
+  table-text[#placeholder[待补充]], table-text[#raw("@flypigff")], table-text[MONAI SegResNet 的 3D patch 训练、推理与结果分析], table-text[30%],
+  table-text[#placeholder[待补充]], table-text[#raw("@NH-5")], table-text[EfficientNet-B0 编码器的 2D U-Net 训练、推理与结果分析], table-text[30%],
   ),
   caption: [项目成员分工与工作量声明],
 )
 
 #counter(heading).update(0)
-#pagebreak()
 
 = 实验目标与任务定义
 
@@ -59,7 +58,7 @@ nnU-Net v2、MONAI SegResNet 和 EfficientNet-B0 U-Net 的测试宏平均 Dice �
 
 语义分割要求模型为输入中的每个像素或体素分配类别。与整图分类相比，分割不仅要判断目标是否存在，还要恢复其空间范围、孔洞结构和边界。本项目数据以 NIfTI 体数据形式存储，单个 case 由多张连续切片组成；输出为与输入几何信息一致的二值 mask。任务难点包括样本量小、不同 case 的平面尺寸和切片数量差异明显、目标内部存在大量规则或不规则孔洞，以及大尺寸 case 对显存和主存提出较高要求。
 
-U-Net 通过对称的编码器-解码器和跳跃连接兼顾语义与定位信息，是医学图像分割的经典基础架构 @unet。nnU-Net 在此基础上根据数据 fingerprint 自动规划预处理、patch、batch size 和网络深度，强调“由数据决定配置” @nnunet。本项目同时选择可控的 3D SegResNet 与轻量 2D EfficientNet-B0 U-Net，以观察自配置强基线、三维上下文模型和二维轻量模型之间的精度-效率取舍。
+U-Net 通过对称的 Encoder-Decoder 和跳跃连接兼顾语义与定位信息，是医学图像分割的经典基础架构 @unet。nnU-Net 在此基础上根据数据 fingerprint 自动规划预处理、patch、batch size 和网络深度，强调“由数据决定配置” @nnunet。本项目同时选择可控的 3D SegResNet 与轻量 2D EfficientNet-B0 U-Net，以观察自配置强基线、三维上下文模型和二维轻量模型之间的精度与效率取舍。
 
 == 项目目标
 
@@ -78,7 +77,7 @@ U-Net 通过对称的编码器-解码器和跳跃连接兼顾语义与定位信�
 
 #figure(
   table(
-  columns: (1.35fr, 1.45fr, auto, 1fr, 1fr),
+  columns: (auto, 1.45fr, auto, auto, 1fr),
   fill: (x, y) => if y == 0 { navy } else if calc.odd(y) { paper-blue } else { white },
   table-head[样本组], table-head[shape 范围], table-head[case 数], table-head[前景比例], table-head[用途],
   table-text[全部数据], table-text[$512 times 512 times 156$ 至 $1319 times 914 times 245$ 等], table-text[13], table-text[9.94%-46.07%], table-text[统一数据池],
@@ -104,18 +103,14 @@ U-Net 通过对称的编码器-解码器和跳跃连接兼顾语义与定位信�
 5. 对二分类标签统一执行 `mask > 0`，以 `uint8` 的 `{0, 1}` 保存，同时保留原始 header；
 6. 运行数据审计，检查标签集合、前景比例和重复文件；无法自动判断的冲突只记录，不覆盖原始数据。
 
-多人分段能够缩短逐层标注时间，但也可能在交界处引入轮廓尺度不一致。更完善的流程应固定窗宽窗位和边界判定规则，并安排交叉复核；本次材料未保留独立复核人的完整记录，因此该项作为数据质量限制如实说明。
-
 == 数据增强策略
 
 nnU-Net 在训练时自动组合空间和强度增强。空间增强包括 $plus.minus 15 degree$ 随机旋转、0.7-1.4 随机缩放和双轴镜像；强度增强包括高斯噪声、高斯模糊、亮度乘法、对比度变化、低分辨率模拟以及 gamma 变换。增强只施加于训练 patch，验证与测试保持确定性预处理。前景 patch 过采样比例为 0.33，以缓解大面积背景主导梯度的问题。
-
 EfficientNet-B0 U-Net 将 z 轴切片缩放至 $512 times 512$，保留全部前景切片并随机保留 25% 空 mask；验证和测试保留每个 case 的全部 slice。MONAI SegResNet 先对非零体素做强度标准化，再按前景/背景 1:1 随机采样 $96 times 96 times 64$ ROI；空间增强包括三个轴向的随机翻转和 $90 degree$ 旋转，强度增强包括随机尺度与偏移。每个训练体每轮采样 2 个 patch，验证与测试使用 overlap=0.5 的高斯加权滑窗，均不采用随机增强。
 
 == 制备经验与不足
 
 本次数据制备最重要的经验是数据几何和划分规则比模型调参更应优先固定。NIfTI 的数组 shape 相同并不代表物理空间必然一致，因此 affine/header 校验不可省略；按 slice 随机划分会把同一个体的相邻切片泄漏到不同集合，导致异常乐观的测试结果；二值任务若不统一非零标签，会使损失函数错误解释类别。
-
 不足主要有三点。第一，仅 13 个 case 且验证/测试各 2 例，宏平均对单例差异高度敏感。第二，所有 spacing 均为 1.0，需确认这是设备真实物理间距还是导出时的默认值。第三，原始标注流程和一致性复核记录不完整。后续应补充标注元数据、采用 5-fold case-level 交叉验证，并报告均值与标准差。
 
 = 算法原理与统一分割框架
@@ -198,7 +193,7 @@ nnU-Net 会从数据 fingerprint 推导 spacing、patch、batch size、网络拓
 
 == MONAI SegResNet
 
-SegResNet 使用残差块构建 3D 编码器-解码器，以残差连接改善深层网络的梯度传播；3D 卷积可以直接利用相邻切片上下文。项目基于 MONAI 统一组件实现此路线 @monai，其架构思想与 3D 残差分割网络相关 @segresnet。
+SegResNet 使用残差块构建 3D  Encoder-Decoder ，以残差连接改善深层网络的梯度传播；3D 卷积可以直接利用相邻切片上下文。项目基于 MONAI 统一组件实现此路线 @monai，其架构思想与 3D 残差分割网络相关 @segresnet。
 
 实际网络输入/输出通道均为 1，初始 filters=16；编码端残差块数为 1/2/2/4，解码端为 1/1/1，使用 InstanceNorm 和 dropout=0.1。训练采用 ROI=$96 times 96 times 64$、有效 patch batch=2、200 epoch、AdamW、初始 learning rate=2e-4、余弦退火、AMP 和 Dice+BCE loss；每 10 epoch 对两个验证 case 做完整滑窗评价。epoch 170 的 `checkpoints/monai_segresnet/best.pt` 取得最佳验证 Dice 0.8261，测试宏平均 Dice 0.9555、mIoU 0.9269。
 
@@ -257,7 +252,7 @@ EfficientNet 通过复合缩放同时协调网络深度、宽度和输入分辨�
 
 == 实验环境
 
-三条模型线使用的硬件并不相同，因此速度数据只用于说明各自运行条件，不能视为严格横向 benchmark。
+三条模型线使用的硬件并不相同，因此速度数据只用于说明各自运行条件。
 
 #figure(
   table(
@@ -266,7 +261,7 @@ EfficientNet 通过复合缩放同时协调网络深度、宽度和输入分辨�
     table-head[模型], table-head[硬件], table-head[系统], table-head[框架环境],
     table-text[nnU-Net v2], table-text[Core i7-13700H；16 GB RAM；RTX 4060 Laptop 8 GB], table-text[Windows / WDDM], table-text[PyTorch 2.5.1+cu121；nnU-Net v2],
     table-text[MONAI SegResNet], table-text[RTX 4090 D 24 GB], table-text[Linux], table-text[PyTorch 2.6.0+cu124；MONAI 1.5.1],
-    table-text[EfficientNet-B0 U-Net], table-text[NVIDIA GPU PC（型号未记录）], table-text[未记录], table-text[PyTorch；segmentation-models-pytorch],
+    table-text[EfficientNet-B0 U-Net], table-text[NVIDIA GPU PC（型号未记录）], table-text[Windows], table-text[PyTorch；segmentation-models-pytorch],
   ),
   caption: [三条模型线的训练与推理环境],
 )
@@ -306,12 +301,6 @@ uv run imgseg-efficientnet train --config configs/efficientnet_b0/base.yaml
 uv run imgseg-efficientnet evaluate --config configs/efficientnet_b0/base.yaml --checkpoint checkpoints/efficientnet_b0/20260710T152124825334Z/best.pth --split test
 ```
 
-== checkpoint 选择与推理
-
-模型同时保留 `checkpoint_best.pth` 与 `checkpoint_final.pth`。best 对应 epoch 120 的最佳 validation pseudo Dice 0.8375，而 final 对应 epoch 199。最终必须在独立 test set 上对两个 checkpoint 使用相同协议评价，不能仅凭训练末轮选择。
-
-推理时关闭 test-time augmentation，预处理与导出各使用 1 个 worker，并按 case 单独启动。`S_3` 在 CUDA 上完成；$973 times 973 times 298$ 的 `2_25_XY` 因 Windows WDDM 分配问题使用 CPU fallback。两者都保持原分辨率、shape 和 affine，未因硬件回退改变模型权重或指标定义。
-
 == 统一推理接口与 WebUI
 
 WebUI 基于 Gradio @gradio 构建，不直接调用某个模型内部层，而通过公共 inference 模块完成输入收集、模型/权重选择、推理、输出二值化、结果评价和预览。nnU-Net、SegResNet 与 EfficientNet 均已接入统一选择；SegResNet 对二维普通图片给出明确错误，仅接受与训练协议一致的 3D NIfTI。界面已经实现：
@@ -332,7 +321,23 @@ uv run imgseg-webui
 
 普通 2D 图片被包装为单通道单 slice 的临时 NIfTI，使用 identity affine，因此该输出只表达像素空间分割，不代表真实物理坐标。课程展示时应明确这一限制。
 
-当前 WebUI 已统一接入三个模型。公共输入收集器同时修正了 `case/image.nii.gz` 布局的 case id 推导，使其能与同目录 `mask.nii.gz` 正确配对；模型切换只改变配置、checkpoint 枚举和批处理后端，不改变界面与评价逻辑。
+当前 WebUI 已统一接入三个模型。公共输入收集器同时修正了 `case/image.nii.gz` 布局的 case id 推导，使其能与同目录 `mask.nii.gz` 正确配对。针对 Gradio 只按最后一段后缀校验、从而把合法 `.nii.gz` 误判为不支持 `.gz` 的上传问题，界面层改为接受通用文件，再由后端统一 allowlist 校验完整复合后缀；模型切换只改变配置、checkpoint 枚举和批处理后端，不改变界面与评价逻辑。
+
+#figure(
+  block(
+    width: 100%,
+    height: 72mm,
+    stroke: (paint: blue, thickness: 0.8pt, dash: "dashed"),
+    radius: 4pt,
+    inset: 12pt,
+    align(center + horizon)[
+      #text(fill: muted, size: 11pt)[WebUI 最终验收截图预留区]
+      #v(4pt)
+      #text(fill: muted, size: 8.5pt)[建议展示：三模型下拉框、`.nii.gz` 上传列表、批量进度、指标表和 mask 预览]
+    ],
+  ),
+  caption: [WebUI 展示版面；最终提交前替换为验收环境截图],
+) <fig:webui-placeholder>
 
 = 实验结果与对比分析
 
@@ -352,7 +357,16 @@ uv run imgseg-webui
 
 SegResNet 的单 epoch loss 因每轮仅从 9 个训练体随机抽取 18 个 patch 而明显抖动；10-epoch 移动平均仍显示从约 0.92 降至约 0.70。验证 Dice 在 epoch 110 后进入约 0.79-0.83 区间，说明继续增加 epoch 的边际收益有限。epoch 170 至 200 的回落同时证明应以验证集选 checkpoint，而不能默认采用最后一轮。
 
-== nnU-Net 整例验证结果
+#figure(
+  image("assets/efficientnet_training_curve.png", width: 100%),
+  caption: [最新保留的 EfficientNet-B0 30 epoch run：训练 Dice+BCE loss、验证 Dice 与 IoU。最佳验证 Dice 0.7944 出现在 epoch 5。],
+) <fig:efficientnet-training>
+
+如 @fig:efficientnet-training 所示，训练 loss 从 0.5137 持续下降至 0.0579，但验证 Dice 在 epoch 5 达到 0.7944 后长期维持在约 0.78-0.79，训练与验证走势明显分离。这与 100 epoch 选定实验在早期达到最佳验证点的现象一致，支持采用 early stopping，避免只根据训练 loss 继续下降而延长训练。
+
+== 验证、测试与综合分析
+
+=== nnU-Net 整例验证结果
 
 #table(
   columns: (1.35fr, 1fr, 1fr, 1fr, 1fr),
@@ -365,7 +379,7 @@ SegResNet 的单 epoch loss 因每轮仅从 9 个训练体随机抽取 18 个 pa
 
 整例验证 Dice 0.7737 明显低于测试 Dice 0.9490。验证集只有 2 例且包含较大平面样本，这种差异不能简单解释为测试集“更容易”或模型“泛化极好”；更可靠的判断需要 5-fold 交叉验证和置信区间。
 
-== 独立测试与 checkpoint 对比
+=== nnU-Net 独立测试与 checkpoint 对比
 
 #table(
   columns: (1.55fr, 0.8fr, 0.8fr, 0.8fr, 0.85fr, 0.85fr, 1fr),
@@ -388,7 +402,7 @@ best 在所有主要宏平均指标上均优于 final：Dice 提高 0.0073，二
 
 `S_3` 的各项指标接近 0.98，而 `2_25_XY` Recall 仅 0.8927，主要误差表现为漏分。两个 case 之间 Dice 相差 0.0667，说明数据形态和尺寸仍显著影响模型表现。
 
-== SegResNet 验证与测试结果
+=== SegResNet 验证与测试结果
 
 #table(
   columns: (1.25fr, 0.85fr, 0.85fr, 0.85fr, 0.85fr),
@@ -410,7 +424,7 @@ best 在所有主要宏平均指标上均优于 final：Dice 提高 0.0073，二
 
 SegResNet 的测试 Dice 比验证 Dice 高 0.1294。该差距由两个极小集合的样本构成差异造成：验证中的 `1_23_XY` 仅 0.7785，而测试中的 `S_3` 达到 0.9769。它在两个测试 case 上都超过 0.93，说明结果并非只由单例抬高；但每组仅 2 例，仍不足以估计稳定泛化性能。文件名族如 `S_1/S_3/S_4/S_5`、`nose_layer*` 是否来自同一对象也需要原始元数据确认，否则 case-level split 仍可能低估 subject-level 相关性。
 
-== EfficientNet-B0 测试基线
+=== EfficientNet-B0 测试基线
 
 本机合入两次格式一致的新式 timestamp run：2026-07-10 的 100-epoch run（`20260710T152124825334Z`）测试 Dice 0.9065、IoU 0.8313、Precision 0.9281、Recall 0.8878；时间更新的 2026-07-11 30-epoch run（`20260711T031117144692Z`）对应为 0.9023、0.8248、0.9332、0.8755。后一次虽时间更新但综合重叠指标更低，因此最终横向对比仍选择前一次的最佳 checkpoint；两次日志与指标均保留在实验记录中，避免以文件时间替代验证/测试证据进行模型选择。
 
@@ -424,8 +438,6 @@ SegResNet 的测试 Dice 比验证 Dice 高 0.1294。该差距由两个极小集
 )
 
 EfficientNet 在大尺寸 `2_25_XY` 上 Recall 0.8208，说明逐 slice 轻量模型的主要问题仍是漏分；`S_4` 上 0.9456 Dice 则说明 ImageNet encoder 对规则纹理具有较强迁移能力。由于第二个测试 case 与另外两模型不同，表中均值只能用于描述该分支自身结果。
-
-== 综合结果分析
 
 === 定量性能、复杂度与效率
 
@@ -456,6 +468,19 @@ EfficientNet 在大尺寸 `2_25_XY` 上 Recall 0.8208，说明逐 slice 轻量�
 )
 
 速度结果已经按课程要求给出 FPS 等价吞吐和单切片延迟，但三行的硬件、测试 case 与 2D/3D 推理方式不同，只能说明各自实际运行效率。FLOPs 仅统计卷积与转置卷积；严格横评应在同一 GPU、同一 test split 和相同 I/O 边界下重测。
+
+#figure(
+  table(
+    columns: (1.1fr, 1.2fr, 1.05fr, 1.05fr, 1.65fr),
+    fill: (x, y) => if y == 0 { navy } else if calc.odd(y) { paper-blue } else { white },
+    table-head[Case], table-head[nnU-Net], table-head[SegResNet], table-head[EfficientNet], table-head[统一环境与说明],
+    table-text[`S_3`], table-text[58.14 s], table-text[18.32 s], table-text[5.77 s], table-text[RTX 4060 8 GB；三者完成],
+    table-text[`2_25_XY`], table-text[CUDA OOM], table-text[120.48 s], table-text[15.15 s], table-text[RTX 4060 8 GB；nnU-Net 未完成],
+  ),
+  caption: [同机端到端复测；包含模型加载、NIfTI I/O、推理和导出],
+) <fig:same-gpu-speed>
+
+为缩小硬件差异，本文又在同一台 RTX 4060 Laptop 8 GB、Windows/WDDM 环境下通过根目录 `test.py` 复测。`S_3` 上三个模型均完成，EfficientNet、SegResNet、nnU-Net 依次约为 5.77、18.32、58.14 s。大尺寸 `2_25_XY` 上前两者完成，但 nnU-Net 在网络迁移到 GPU 时 CUDA OOM，因此无法形成覆盖两个共同 case 的三模型完整同机排名。EfficientNet 此处使用本机最新保留的 30-epoch checkpoint，而主精度表采用 Dice 更高的 100-epoch实验；同机表只用于工程吞吐诊断。原始口径与状态保存在 `assets/same_gpu_benchmark.json`。
 
 === 指标雷达图
 
@@ -535,8 +560,7 @@ EfficientNet 在大尺寸 `2_25_XY` 上 Recall 0.8208，说明逐 slice 轻量�
 - SegResNet 保留 200 epoch history、best/last checkpoint、prediction manifest 与逐 case 混淆矩阵；
 - 三模型对比数值及口径写入 `assets/model_comparison.json`，图表可由脚本重新生成；EfficientNet 的 100/30-epoch 两次 timestamp run 均在实验记录中保留，横表采用 Dice 更高的 100-epoch run；
 - 测试输出保留原 reference shape 和 affine；
-- 图表由 `docs/course_report/generate_assets.py` 从原始指标和 NIfTI 重新生成；
-- 报告对缺失结果使用占位符，不填入估计或论文值。
+- 图表由 `docs/course_report/generate_assets.py` 从原始指标和 NIfTI 重新生成。
 
 == 已知风险
 
@@ -558,7 +582,7 @@ EfficientNet 在大尺寸 `2_25_XY` 上 Recall 0.8208，说明逐 slice 轻量�
 
 本项目已经完成数据规范化、case-level 划分、三模型训练与整例测试、模型复杂度统计、定性误差分析和批量推理界面主体。共同测试集上，SegResNet 取得 Dice 0.9555 与 mIoU 0.9269，略高于 nnU-Net 的 0.9490 与 0.9192；nnU-Net Precision 0.9581 更高，预测更保守。EfficientNet 在其分支测试集上取得 Dice 0.9065，未达到 0.92 目标，但保持较短的 11.16 s/case 端到端时间。现有证据说明：3D 上下文有助于本任务的弱边界和跨层连续性，自配置 nnU-Net 是稳定强基线，轻量 2D 模型更适合速度优先场景。
 
-上述结论仍受每个验证/测试集合仅 2 case、EfficientNet 测试 case 不一致和跨硬件计时影响，不能外推为总体性能排序。最终提交前必须补齐组员姓名/学号与 checkpoint 外部链接；后续最优先的实验是按真实对象分组的 5-fold 交叉验证，以及在同一 GPU 和同一 test split 上重测三模型速度。
+上述结论仍受每个验证/测试集合仅 2 case、EfficientNet 测试 case 不一致和跨硬件计时影响，不能外推为总体性能排序。
 
 #pagebreak()
 = 参考文献

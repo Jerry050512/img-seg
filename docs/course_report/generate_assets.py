@@ -56,6 +56,7 @@ REPORT_DIR = ROOT / "outputs" / "reports" / RUN_ID
 PRED_DIR = ROOT / "outputs" / f"{RUN_ID}_best"
 TEST_DIR = ROOT / "dataset" / "processed" / "nnunet_raw" / "Dataset501_ImgSeg"
 SEGRESNET_HISTORY = ROOT / "outputs" / "monai_segresnet" / "history.json"
+EFFICIENTNET_LOG = ROOT / "outputs" / "efficientnet_b0" / "20260711T031117144692Z" / "train.log"
 SEGRESNET_PRED_DIR = ROOT / "outputs" / "monai_segresnet" / "test_predictions"
 SEGRESNET_TEST_DIR = ROOT / "dataset"
 COMPARISON_PATH = ASSETS / "model_comparison.json"
@@ -94,6 +95,7 @@ def require_generation_inputs() -> None:
         PRED_DIR / "metrics.json",
         PLANS_PATH,
         SEGRESNET_HISTORY,
+        EFFICIENTNET_LOG,
         COMPARISON_PATH,
     ]
     for case_id in ("S_3", "2_25_XY"):
@@ -355,6 +357,61 @@ def generate_segresnet_training_curve() -> None:
     plt.close(fig)
 
 
+def generate_efficientnet_training_curve() -> None:
+    """Render the latest retained EfficientNet JSONL training history."""
+
+    records = [
+        json.loads(line)
+        for line in EFFICIENTNET_LOG.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    epochs = [row for row in records if row.get("event") == "epoch_completed"]
+    if not epochs:
+        raise ValueError(f"No epoch_completed records found in {EFFICIENTNET_LOG}")
+    epoch_numbers = [int(row["epoch"]) for row in epochs]
+    losses = [float(row["train_loss"]) for row in epochs]
+    val_dice = [float(row["dice"]) for row in epochs]
+    val_iou = [float(row["iou"]) for row in epochs]
+    best_index = int(np.argmax(val_dice))
+
+    fig, axes = plt.subplots(1, 2, figsize=(11.8, 4.2), dpi=180)
+    axes[0].plot(epoch_numbers, losses, color=COLORS["orange"], lw=1.6)
+    axes[0].set(
+        title="EfficientNet-B0 training loss",
+        xlabel="Epoch",
+        ylabel="Dice + BCE loss",
+    )
+
+    axes[1].plot(epoch_numbers, val_dice, color=COLORS["teal"], lw=1.4, label="Dice")
+    axes[1].plot(epoch_numbers, val_iou, color=COLORS["blue"], lw=1.2, label="IoU")
+    axes[1].scatter(
+        [epoch_numbers[best_index]],
+        [val_dice[best_index]],
+        color=COLORS["red"],
+        s=35,
+        zorder=3,
+    )
+    axes[1].annotate(
+        f"best Dice {val_dice[best_index]:.4f}",
+        (epoch_numbers[best_index], val_dice[best_index]),
+        xytext=(8, -20),
+        textcoords="offset points",
+        fontsize=8,
+    )
+    axes[1].set(title="Validation metrics", xlabel="Epoch", ylabel="Score", ylim=(0.55, 0.83))
+    axes[1].legend(frameon=False, fontsize=8)
+    for ax in axes:
+        ax.grid(alpha=0.18)
+        ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(
+        ASSETS / "efficientnet_training_curve.png",
+        bbox_inches="tight",
+        facecolor="white",
+    )
+    plt.close(fig)
+
+
 def generate_radar() -> None:
     comparison = json.loads(COMPARISON_PATH.read_text(encoding="utf-8"))
     labels = ["mIoU", "Dice", "Accuracy", "Precision", "Recall"]
@@ -424,9 +481,7 @@ def measure_network() -> None:
         nonlocal flops
         kernel = int(np.prod(module.kernel_size))
         if isinstance(module, torch.nn.ConvTranspose2d):
-            multiply_adds = (
-                int(inputs[0].numel()) * kernel * module.out_channels // module.groups
-            )
+            multiply_adds = int(inputs[0].numel()) * kernel * module.out_channels // module.groups
         else:
             multiply_adds = int(output.numel()) * kernel * module.in_channels // module.groups
         bias_adds = int(output.numel()) if module.bias is not None else 0
@@ -533,9 +588,7 @@ def measure_efficientnet_network() -> None:
         nonlocal flops
         kernel = int(np.prod(module.kernel_size))
         if isinstance(module, torch.nn.ConvTranspose2d):
-            multiply_adds = (
-                int(inputs[0].numel()) * kernel * module.out_channels // module.groups
-            )
+            multiply_adds = int(inputs[0].numel()) * kernel * module.out_channels // module.groups
         else:
             multiply_adds = int(output.numel()) * kernel * module.in_channels // module.groups
         flops += 2 * multiply_adds + (int(output.numel()) if module.bias is not None else 0)
@@ -596,6 +649,7 @@ def main(argv: list[str] | None = None) -> None:
     ASSETS.mkdir(parents=True, exist_ok=True)
     generate_training_curves()
     generate_segresnet_training_curve()
+    generate_efficientnet_training_curve()
     generate_radar()
     generate_bad_cases()
     generate_segresnet_bad_cases()

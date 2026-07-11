@@ -4,7 +4,7 @@
 
 > 班级 / 组长姓名：提交前由小组补充（仓库现有材料仅记录账号 `@Jerry050512`、`@NH-5`、`@flypigff`）。
 
-## 助教快速验收
+## 快速验收
 
 当前代码要求 **Python 3.12**。项目正式使用 `uv` 与 `uv.lock`；课程要求的
 `requirements.txt` 仅作为 deprecated 的 `pip` 兼容入口，依赖真值仍是
@@ -22,7 +22,7 @@ uv sync
 python -m pip install -r requirements.txt
 ```
 
-批量测试；`test.py` 的 stdout 最后一行始终是标准 JSON，并包含 `mIoU`、
+批量测试: `test.py` 的 stdout 最后一行始终是标准 JSON，并包含 `mIoU`、
 `Dice`、`precision`、`recall`、`PixelAcc`、`FPS` 与 `Params(M)`：
 
 ```bash
@@ -48,7 +48,7 @@ uv run python predict.py --model efficientnet_b0 --image /data/evaluation/sample
 uv run python predict.py --model efficientnet_b0 --input-dir /data/evaluation/test/ --weight ./best_model.pth --output-dir ./Test_Seg
 ```
 
-训练模型（数据路径不写死，目录格式为 `case_id/image.nii.gz` 与
+训练模型（目录格式为 `case_id/image.nii.gz` 与
 `case_id/mask.nii.gz`）：
 
 ```bash
