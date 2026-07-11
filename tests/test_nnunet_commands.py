@@ -57,3 +57,30 @@ def test_nnunet_runtime_env_supports_worker_and_external_trainer_paths(tmp_path:
     assert env["nnUNet_npp"] == "1"
     assert env["nnUNet_nps"] == "1"
     assert env["nnUNet_extTrainer"] == str(tmp_path / "trainers")
+
+
+def test_nnunet_predict_supports_low_memory_options(tmp_path: Path, capsys) -> None:
+    config_path = write_command_config(tmp_path)
+
+    predict(
+        config_path,
+        configuration="2d",
+        folds="0",
+        checkpoint_name="checkpoint_best.pth",
+        device="cpu",
+        disable_tta=True,
+        not_on_device=True,
+        num_processes_preprocessing=1,
+        num_processes_segmentation_export=1,
+        num_parts=2,
+        part_id=0,
+        dry_run=True,
+    )
+
+    command = capsys.readouterr().out
+    assert "-device cpu" in command
+    assert "--disable_tta" in command
+    assert "--not_on_device" in command
+    assert "-npp 1" in command
+    assert "-nps 1" in command
+    assert "-num_parts 2 -part_id 0" in command
