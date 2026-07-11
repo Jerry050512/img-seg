@@ -1,0 +1,20 @@
+[
+  {
+    "case_id": "S_3",
+    "category": "边界清晰且高度吻合",
+    "slice": 175,
+    "asset": "bad_case_1.png"
+  },
+  {
+    "case_id": "2_25_XY",
+    "category": "弱边界导致漏分",
+    "slice": 272,
+    "asset": "bad_case_2.png"
+  },
+  {
+    "case_id": "2_25_XY",
+    "category": "复杂边界导致误分",
+    "slice": 266,
+    "asset": "bad_case_3.png"
+  }
+]

@@ -1,0 +1,14 @@
+{
+  "input": [
+    1,
+    1,
+    96,
+    96,
+    64
+  ],
+  "parameters": 4697537,
+  "parameters_million": 4.697537,
+  "conv_flops": 81688854528,
+  "conv_flops_giga": 81.688854528,
+  "counting_convention": "one multiply and one add are counted as two FLOPs; 3D convolution and transposed convolution only"
+}
