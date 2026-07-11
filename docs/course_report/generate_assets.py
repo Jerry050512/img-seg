@@ -16,11 +16,11 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-from matplotlib import font_manager
 import nibabel as nib
 import numpy as np
 import pandas as pd
 import torch
+from matplotlib import font_manager
 
 plt.switch_backend("Agg")
 
