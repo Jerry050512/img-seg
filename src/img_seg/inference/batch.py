@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha1
 from pathlib import Path
@@ -26,6 +27,10 @@ from img_seg.config import deep_get, resolve_project_path
 from img_seg.evaluation.metrics import binary_metrics
 from img_seg.evaluation.visualize import choose_slice, normalize_image, take_slice
 from img_seg.io.nifti import binarize_mask, load_nifti_array, require_nibabel, save_like
+from img_seg.models.efficientnet_b0 import (
+    DEFAULT_CONFIG_PATH as DEFAULT_EFFICIENTNET_CONFIG,
+)
+from img_seg.models.efficientnet_b0 import EfficientNetB0Segmenter, load_efficientnet_config
 from img_seg.models.nnunet_v2 import (
     dataset_folder_name,
     load_nnunet_config,
@@ -34,8 +39,8 @@ from img_seg.models.nnunet_v2 import (
 
 DEFAULT_NNUNET_CONFIG = Path("configs/nnunet_v2/base.yaml")
 DEFAULT_OUTPUT_DIR = Path("Test_Seg")
-IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
-ModelKey = Literal["nnunet_v2"]
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+ModelKey = Literal["nnunet_v2", "efficientnet_b0"]
 InputKind = Literal["nifti", "image"]
 
 
@@ -91,12 +96,24 @@ class ResultMetrics:
 
 
 def list_available_models() -> list[ModelInfo]:
-    return [ModelInfo(key="nnunet_v2", label="nnU-Net v2 2D")]
+    return [
+        ModelInfo(key="nnunet_v2", label="nnU-Net v2 2D"),
+        ModelInfo(key="efficientnet_b0", label="EfficientNet-B0 2D U-Net"),
+    ]
 
 
 def strip_known_suffix(path: Path) -> str:
     name = path.name
-    for suffix in (".nii.gz", ".nii", ".jpeg", ".jpg", ".png"):
+    for suffix in (
+        ".nii.gz",
+        ".nii",
+        ".jpeg",
+        ".jpg",
+        ".png",
+        ".bmp",
+        ".tiff",
+        ".tif",
+    ):
         if name.lower().endswith(suffix):
             return name[: -len(suffix)]
     return path.stem
@@ -127,6 +144,19 @@ def is_image_path(path: Path) -> bool:
     return path.suffix.lower() in IMAGE_SUFFIXES
 
 
+def _looks_like_nifti_mask(path: Path) -> bool:
+    if not is_nifti_path(path):
+        return False
+    stem = strip_known_suffix(path)
+    return bool(
+        re.search(
+            r"(?:^|[._-])(?:seg|mask|label)(?:\(\d+\))*$",
+            stem,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _coerce_upload_path(value: object) -> Path | None:
     if value is None:
         return None
@@ -143,15 +173,22 @@ def _coerce_upload_path(value: object) -> Path | None:
     return None
 
 
-def _iter_supported_files(path: Path) -> list[Path]:
+def _iter_supported_files(path: Path, *, include_nifti_masks: bool) -> list[Path]:
+    def is_supported(file: Path) -> bool:
+        if not (is_nifti_path(file) or is_image_path(file)):
+            return False
+        return include_nifti_masks or not _looks_like_nifti_mask(file)
+
     if path.is_file():
+        # An explicitly selected file is authoritative; mask-name heuristics only filter
+        # recursive input-directory scans.
         return [path] if is_nifti_path(path) or is_image_path(path) else []
     if not path.is_dir():
         raise FileNotFoundError(f"Input path does not exist: {path}")
     files = [
         file
         for file in path.rglob("*")
-        if file.is_file() and (is_nifti_path(file) or is_image_path(file))
+        if file.is_file() and is_supported(file)
     ]
     return sorted(files, key=natural_sort_key)
 
@@ -164,11 +201,13 @@ def collect_inputs(
 
     paths: list[Path] = []
     if input_path:
-        paths.extend(_iter_supported_files(resolve_project_path(input_path)))
+        paths.extend(
+            _iter_supported_files(resolve_project_path(input_path), include_nifti_masks=False)
+        )
     for uploaded in uploaded_files or []:
         path = _coerce_upload_path(uploaded)
         if path is not None:
-            paths.extend(_iter_supported_files(path))
+            paths.extend(_iter_supported_files(path, include_nifti_masks=False))
 
     unique: list[Path] = []
     seen_paths: set[Path] = set()
@@ -190,7 +229,8 @@ def collect_inputs(
 
     if not inputs:
         raise ValueError(
-            "No supported input files found. Expected .nii, .nii.gz, .jpg, .jpeg, or .png."
+            "No supported input files found. Expected .nii, .nii.gz, .jpg, .jpeg, .png, "
+            ".bmp, .tif, or .tiff."
         )
     return inputs
 
@@ -201,11 +241,13 @@ def collect_reference_masks(
 ) -> dict[str, Path]:
     paths: list[Path] = []
     if reference_path:
-        paths.extend(_iter_supported_files(resolve_project_path(reference_path)))
+        paths.extend(
+            _iter_supported_files(resolve_project_path(reference_path), include_nifti_masks=True)
+        )
     for uploaded in uploaded_files or []:
         path = _coerce_upload_path(uploaded)
         if path is not None:
-            paths.extend(_iter_supported_files(path))
+            paths.extend(_iter_supported_files(path, include_nifti_masks=True))
 
     references: dict[str, Path] = {}
     seen_paths: set[Path] = set()
@@ -226,13 +268,36 @@ def collect_reference_masks(
 def list_checkpoints(
     model_key: ModelKey = "nnunet_v2",
     *,
-    config_path: str | Path = DEFAULT_NNUNET_CONFIG,
+    config_path: str | Path | None = None,
     configuration: str = "2d",
     fold: str = "0",
 ) -> list[CheckpointInfo]:
+    if model_key == "efficientnet_b0":
+        efficientnet_config = load_efficientnet_config(config_path or DEFAULT_EFFICIENTNET_CONFIG)
+        checkpoint_dir = resolve_project_path(
+            deep_get(efficientnet_config, "checkpoints.output_dir", "checkpoints/efficientnet_b0")
+        )
+        checkpoints = list(checkpoint_dir.rglob("*.pth"))
+        configured_best_name = Path(
+            deep_get(efficientnet_config, "checkpoints.best", checkpoint_dir / "best.pth")
+        ).name
+
+        def efficientnet_priority(path: Path) -> tuple[str, bool, str]:
+            relative = path.relative_to(checkpoint_dir)
+            run_name = relative.parts[-2] if len(relative.parts) > 1 else ""
+            return (run_name, path.name == configured_best_name, path.name)
+
+        return [
+            CheckpointInfo(
+                label=f"{checkpoint.name} - {checkpoint.parent.name}",
+                path=checkpoint,
+                checkpoint_name=checkpoint.name,
+            )
+            for checkpoint in sorted(checkpoints, key=efficientnet_priority, reverse=True)
+        ]
     if model_key != "nnunet_v2":
         return []
-    config = load_nnunet_config(config_path)
+    config = load_nnunet_config(config_path or DEFAULT_NNUNET_CONFIG)
     paths = nnunet_paths_from_config(config)
     dataset_name = dataset_folder_name(
         int(deep_get(config, "dataset.id")),
@@ -571,35 +636,99 @@ def _run_nnunet_predict(
         )
 
 
+def _run_efficientnet_inference(
+    *,
+    inputs: list[InferenceInput],
+    output_path: Path,
+    checkpoint_path: str | Path | None,
+    config_path: str | Path,
+    device: str | None,
+    cancel_event: threading.Event | None,
+    progress_callback: Callable[[int, int, Path], None] | None,
+) -> list[InferenceResult]:
+    if checkpoint_path is None:
+        raise ValueError("EfficientNet-B0 inference requires a checkpoint path")
+    resolved_checkpoint = resolve_project_path(checkpoint_path)
+    if not resolved_checkpoint.is_file():
+        raise FileNotFoundError(f"Checkpoint does not exist: {resolved_checkpoint}")
+
+    segmenter = EfficientNetB0Segmenter(
+        config_path=config_path,
+        device=device,
+        use_pretrained_encoder=False,
+    )
+    segmenter.load(resolved_checkpoint)
+    results: list[InferenceResult] = []
+    for index, item in enumerate(inputs, start=1):
+        _raise_if_cancelled(cancel_event)
+        if item.kind == "nifti":
+            final_output = output_path / f"{item.case_id}_Seg.nii.gz"
+            prediction = segmenter.predict_volume(
+                item.source_path,
+                final_output,
+                check_cancelled=lambda: _raise_if_cancelled(cancel_event),
+            )
+        else:
+            final_output = output_path / f"{item.case_id}.png"
+            prediction = segmenter.predict_image(item.source_path, final_output)
+        results.append(
+            InferenceResult(
+                case_id=item.case_id,
+                input_kind=item.kind,
+                input_path=item.source_path,
+                output_path=Path(prediction["output_path"]),
+                elapsed_sec=float(prediction["elapsed_sec"]),
+                shape=list(prediction["shape"]),
+                status="done",
+            )
+        )
+        if progress_callback is not None:
+            progress_callback(index, len(inputs), item.source_path)
+    return results
+
+
 def run_batch_inference(
     *,
     model_key: ModelKey,
     inputs: list[InferenceInput],
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     checkpoint_path_or_name: str | Path | None = None,
-    config_path: str | Path = DEFAULT_NNUNET_CONFIG,
+    config_path: str | Path | None = None,
     configuration: str = "2d",
     folds: str = "0",
+    device: str | None = None,
     cancel_event: threading.Event | None = None,
+    progress_callback: Callable[[int, int, Path], None] | None = None,
 ) -> list[InferenceResult]:
-    if model_key != "nnunet_v2":
-        raise ValueError(f"Unsupported model: {model_key}")
     output_path = resolve_project_path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
+    if model_key == "efficientnet_b0":
+        return _run_efficientnet_inference(
+            inputs=inputs,
+            output_path=output_path,
+            checkpoint_path=checkpoint_path_or_name,
+            config_path=config_path or DEFAULT_EFFICIENTNET_CONFIG,
+            device=device,
+            cancel_event=cancel_event,
+            progress_callback=progress_callback,
+        )
+    if model_key != "nnunet_v2":
+        raise ValueError(f"Unsupported model: {model_key}")
+    nnunet_config_path = config_path or DEFAULT_NNUNET_CONFIG
 
     with tempfile.TemporaryDirectory(prefix="imgseg_webui_") as temp_dir:
         nnunet_input_dir = Path(temp_dir) / "nnunet_input"
         source_shapes = _prepare_nnunet_input(inputs, nnunet_input_dir, cancel_event)
         started = time.perf_counter()
         _run_nnunet_predict(
-            config_path,
+            nnunet_config_path,
             input_dir=nnunet_input_dir,
             output_dir=output_path,
             configuration=configuration,
             folds=folds,
             checkpoint_name=_prepare_checkpoint_name(
                 checkpoint_path_or_name,
-                config_path=config_path,
+                config_path=nnunet_config_path,
                 configuration=configuration,
                 folds=folds,
             ),
@@ -647,6 +776,47 @@ def run_batch_inference(
             )
         )
     return results
+
+
+def run_batch_prediction(
+    *,
+    model_key: str,
+    checkpoint_path: str | Path,
+    input_dir: str | Path,
+    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
+    config_path: str | Path | None = None,
+    device: str | None = None,
+    progress_callback: Callable[[int, int, Path], None] | None = None,
+) -> list[dict[str, object]]:
+    """Compatibility wrapper used by the command-line batch predictor."""
+
+    if model_key not in {"nnunet_v2", "efficientnet_b0"}:
+        raise ValueError(f"Unsupported model: {model_key}")
+    inputs = collect_inputs(input_dir)
+    results = run_batch_inference(
+        model_key=model_key,
+        inputs=inputs,
+        output_dir=output_dir,
+        checkpoint_path_or_name=checkpoint_path,
+        config_path=config_path,
+        device=device,
+        progress_callback=progress_callback,
+    )
+    failures = [result for result in results if result.status != "done"]
+    if failures:
+        details = "; ".join(
+            f"{result.case_id}: {result.message or result.status}" for result in failures
+        )
+        raise RuntimeError(f"Batch prediction failed for {len(failures)} case(s): {details}")
+    return [
+        {
+            "case_id": result.case_id,
+            "output_path": str(result.output_path),
+            "elapsed_sec": result.elapsed_sec,
+            "shape": result.shape,
+        }
+        for result in results
+    ]
 
 
 def evaluate_result_metrics(
