@@ -2,6 +2,79 @@
 
 本项目用于人工智能综合课程实践：基于 NIfTI 扫描样本及其 segmentation mask，训练并对比 3 个分割模型，最终提供可选择模型的批量推理 WebUI。
 
+> 班级 / 组长姓名：提交前由小组补充（仓库现有材料仅记录账号 `@Jerry050512`、`@NH-5`、`@flypigff`）。
+
+## 快速验收
+
+当前代码要求 **Python 3.12**。项目正式使用 `uv` 与 `uv.lock`；课程要求的
+`requirements.txt` 仅作为 deprecated 的 `pip` 兼容入口，依赖真值仍是
+`pyproject.toml`。以下命令均可从仓库根目录直接复制。
+
+环境配置（推荐）：
+
+```bash
+uv sync
+```
+
+环境配置（课程兼容/deprecated）：
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+批量测试: `test.py` 的 stdout 最后一行始终是标准 JSON，并包含 `mIoU`、
+`Dice`、`precision`、`recall`、`PixelAcc`、`FPS` 与 `Params(M)`：
+
+```bash
+uv run python test.py --model efficientnet_b0 --data-path /data/evaluation/test/ --weight-path ./best_model.pth --output-dir ./outputs/course_test
+```
+
+如果图像与 Ground Truth 分别位于不同目录：
+
+```bash
+uv run python test.py --model efficientnet_b0 --data-path /data/evaluation/test/images --reference-path /data/evaluation/test/labels --weight-path ./best_model.pth
+```
+
+单个 NIfTI 推理并保存二值 mask 与可视化预览：
+
+```bash
+uv run python predict.py --model efficientnet_b0 --image /data/evaluation/sample.nii.gz --weight ./best_model.pth --output ./result.png
+```
+
+文件夹批量推理（支持 50 个及更多 NIfTI；mask 写入 `Test_Seg/`，预览写入
+`Test_Seg/previews/`）：
+
+```bash
+uv run python predict.py --model efficientnet_b0 --input-dir /data/evaluation/test/ --weight ./best_model.pth --output-dir ./Test_Seg
+```
+
+训练模型（目录格式为 `case_id/image.nii.gz` 与
+`case_id/mask.nii.gz`）：
+
+```bash
+uv run python train.py --model efficientnet_b0 --config configs/efficientnet_b0/base.yaml --data-path /path/to/train_dataset
+```
+
+选择另外两个模型时，把 `--model` 改为 `monai_segresnet` 或 `nnunet_v2`，并传入
+对应配置与 checkpoint。SegResNet 只接受 3D NIfTI；nnU-Net 的 `train.py` 默认依次
+执行数据转换、planning/preprocessing 和 fold 0 训练，可用 `--skip-prepare` 或
+`--skip-plan` 复用已有产物。课程说明中的无前缀写法也兼容，例如：
+
+```bash
+uv run python predict.py image /data/evaluation/sample.nii.gz weight ./best_model.pth output ./result.png
+```
+
+nnU-Net 的训练 checkpoint 同时保存 optimizer state，体积约为仅推理权重的两倍。
+交付前可导出保持 FP32 权重不变、且能被 nnU-Net 原生命令直接读取的推理版本：
+
+```powershell
+uv run python utils/export_nnunet_checkpoint.py `
+  checkpoints/nnunet_v2_runs/<run-id>/Dataset501_ImgSeg/nnUNetTrainer_200epochs__nnUNetPlans__2d/fold_0/checkpoint_best.pth `
+  --output checkpoints/nnunet_v2_runs/<run-id>/Dataset501_ImgSeg/nnUNetTrainer_200epochs__nnUNetPlans__2d/fold_0/checkpoint_best_inference.pth
+```
+
+推理时将 checkpoint 名称改为 `checkpoint_best_inference.pth` 即可；该文件不能用于断点续训。
+
 ## 当前状态
 
 - 原始数据位于 `dataset/`，读取布局规则位于 `configs/data/dataset.yaml`。
@@ -72,7 +145,7 @@ uv run imgseg-predict --model efficientnet_b0 --checkpoint checkpoints/efficient
 uv run imgseg-webui
 ```
 
-WebUI 通过公共批量推理接口提供 `nnU-Net v2` 与 `EfficientNet-B0 2D U-Net` 模型选择，并按所选模型列出可用 checkpoint；也可以手动填写权重路径。输入支持单个文件或文件夹中的 NIfTI，以及 `.jpg`、`.jpeg`、`.png`、`.bmp`、`.tif`、`.tiff` 图片。默认输出目录为 `Test_Seg`，NIfTI 输出 `.nii.gz` 二值 mask，2D 图片输出同名 `.png` 二值 mask。
+WebUI 通过公共批量推理接口提供 `nnU-Net v2`、`MONAI SegResNet 3D` 与 `EfficientNet-B0 2D U-Net` 模型选择，并按所选模型列出可用 checkpoint；也可以手动填写权重路径。输入支持单个文件或文件夹中的 NIfTI，以及 `.jpg`、`.jpeg`、`.png`、`.bmp`、`.tif`、`.tiff` 图片；SegResNet 仅支持 3D NIfTI。默认输出目录为 `Test_Seg`，NIfTI 输出 `.nii.gz` 二值 mask，2D 图片输出同名 `.png` 二值 mask。
 
 普通图片只表达像素空间分割，不包含真实物理间距。选择 nnU-Net v2 时，图片会先按单通道单 slice 转为使用 identity affine 的临时 NIfTI；选择 EfficientNet-B0 时，图片按灰度 2D 输入直接预测。
 

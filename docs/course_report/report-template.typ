@@ -75,7 +75,7 @@
     size: 10.2pt,
     fill: ink,
   )
-  set par(justify: true, leading: 0.74em, first-line-indent: 2em)
+  set par(justify: true, leading: 0.74em)
   set heading(numbering: "1.1")
   set list(indent: 1.25em, body-indent: 0.55em, spacing: 0.32em)
   set enum(indent: 1.25em, body-indent: 0.55em, spacing: 0.32em)
@@ -112,8 +112,8 @@
     #text(size: 13.5pt, fill: navy, weight: "bold")[#counter(heading).display() #it.body]
   ]
   show heading.where(level: 3): it => block(
-    above: 0.6em,
-    below: 0.25em,
+    above: 1em,
+    below: 0.6em,
     breakable: false,
     text(size: 11.2pt, fill: blue, weight: "bold")[#it],
   )
@@ -128,11 +128,12 @@
 #let stat-card(value, label) = block(
   fill: white,
   stroke: 0.7pt + rule,
-  inset: 12pt,
+  inset: 20pt,
   radius: 7pt,
 )[
+  #set align(center)
   #text(font: sans-fonts, size: 18pt, fill: teal, weight: "bold")[#value]
-  #v(2pt)
+  #v(0pt)
   #text(font: sans-fonts, size: 7.8pt, fill: muted, weight: "medium")[#label]
 ]
 
@@ -156,6 +157,7 @@
       rows: (auto, 1fr, auto),
       row-gutter: 1cm,
       box(height: 2.0cm)[
+        #v(1em)
         #text(font: sans-fonts, size: 10pt, fill: muted, weight: "bold", tracking: 0.08em)[COURSE PROJECT · TECHNICAL REPORT]
         #v(8pt)
         #text(font: sans-fonts, size: 15pt, fill: navy, weight: "bold")[#course]

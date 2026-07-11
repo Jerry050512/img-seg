@@ -1,0 +1,60 @@
+{
+  "date": "2026-07-11",
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+    "vram_mib": 8188,
+    "driver": "610.47",
+    "os": "Windows / WDDM"
+  },
+  "protocol": "Root test.py end-to-end inference, including model load, NIfTI I/O and export",
+  "cases": {
+    "S_3": {
+      "nnunet_v2": {
+        "status": "completed",
+        "checkpoint": "checkpoint_best.pth",
+        "seconds_approx": 58.14,
+        "dice": 0.9831,
+        "miou": 0.9708
+      },
+      "monai_segresnet": {
+        "status": "completed",
+        "checkpoint": "best.pt",
+        "seconds_approx": 18.32,
+        "dice": 0.9769,
+        "miou": 0.9602
+      },
+      "efficientnet_b0": {
+        "status": "completed",
+        "checkpoint": "20260711T031117144692Z/best.pth",
+        "seconds_approx": 5.77,
+        "dice": 0.9809,
+        "miou": 0.9668
+      }
+    },
+    "2_25_XY": {
+      "nnunet_v2": {
+        "status": "failed",
+        "checkpoint": "checkpoint_best.pth",
+        "error": "CUDA out of memory while moving the network to the RTX 4060 under WDDM"
+      },
+      "monai_segresnet": {
+        "status": "completed",
+        "checkpoint": "best.pt",
+        "seconds_approx": 120.48,
+        "dice": 0.9342,
+        "miou": 0.8937
+      },
+      "efficientnet_b0": {
+        "status": "completed",
+        "checkpoint": "20260711T031117144692Z/best.pth",
+        "seconds_approx": 15.15,
+        "dice": 0.9184,
+        "miou": 0.8702
+      }
+    }
+  },
+  "limitations": [
+    "The EfficientNet checkpoint is the latest retained 30-epoch run, not the selected 100-epoch accuracy-table run.",
+    "The complete two-case split is not a three-model same-GPU benchmark because nnU-Net failed on 2_25_XY."
+  ]
+}
