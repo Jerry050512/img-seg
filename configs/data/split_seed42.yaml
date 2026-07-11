@@ -4,6 +4,22 @@ ratios:
   train: 0.7
   val: 0.15
   test: 0.15
+train:
+  - H1_20Layer
+  - H2_4Layer
+  - S_1
+  - S_4
+  - S_5
+  - nose_layer12
+  - nose_layer20
+  - nose_layer28
+  - nose_layer36
+val:
+  - 1_23_XY
+  - nose_layer4
+test:
+  - 2_25_XY
+  - S_3
 notes:
   - Keep all slices from the same NIfTI case in the same split.
   - Convert masks with mask > 0 for binary segmentation unless a multi-class task is confirmed.
