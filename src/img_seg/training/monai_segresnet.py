@@ -60,7 +60,28 @@ def _require_training_runtime() -> dict[str, Any]:
         raise RuntimeError(
             "PyTorch and MONAI are required for SegResNet training. Run `uv sync`."
         ) from exc
-    return locals()
+    return {
+        "torch": torch,
+        "CacheDataset": CacheDataset,
+        "DataLoader": DataLoader,
+        "Dataset": Dataset,
+        "list_data_collate": list_data_collate,
+        "sliding_window_inference": sliding_window_inference,
+        "DiceCELoss": DiceCELoss,
+        "TverskyLoss": TverskyLoss,
+        "Compose": Compose,
+        "EnsureChannelFirstd": EnsureChannelFirstd,
+        "EnsureTyped": EnsureTyped,
+        "Lambdad": Lambdad,
+        "LoadImaged": LoadImaged,
+        "NormalizeIntensityd": NormalizeIntensityd,
+        "RandCropByPosNegLabeld": RandCropByPosNegLabeld,
+        "RandFlipd": RandFlipd,
+        "RandRotate90d": RandRotate90d,
+        "RandScaleIntensityd": RandScaleIntensityd,
+        "RandShiftIntensityd": RandShiftIntensityd,
+        "set_determinism": set_determinism,
+    }
 
 
 def load_data(config: dict[str, Any]) -> SegResNetData:
