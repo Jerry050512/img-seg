@@ -1,0 +1,47 @@
+{
+  "nnunet_v2": {
+    "label": "nnU-Net v2 2D",
+    "test_cases": ["2_25_XY", "S_3"],
+    "foreground_iou": 0.9048,
+    "miou": 0.9192,
+    "dice": 0.9490,
+    "accuracy": 0.9587,
+    "precision": 0.9581,
+    "recall": 0.9405,
+    "parameters_million": 46.324558,
+    "conv_flops_giga": 119.267967,
+    "flops_input": "1x1x512x512",
+    "infer_sec_per_case": 426.957,
+    "speed_note": "Mean mixes CPU fallback for 2_25_XY and RTX 4060 Laptop GPU for S_3; S_3 GPU time was 32.079 sec/case."
+  },
+  "monai_segresnet": {
+    "label": "MONAI SegResNet 3D",
+    "test_cases": ["2_25_XY", "S_3"],
+    "foreground_iou": 0.9156526990,
+    "miou": 0.9269482406,
+    "dice": 0.9555323221,
+    "accuracy": 0.9627446732,
+    "precision": 0.9462322866,
+    "recall": 0.9650258831,
+    "parameters_million": 4.697537,
+    "conv_flops_giga": 81.688855,
+    "flops_input": "1x1x96x96x64 ROI",
+    "infer_sec_per_case": 25.5963,
+    "speed_note": "End-to-end sliding-window inference on RTX 4090 D; not directly comparable with the RTX 4060 nnU-Net run."
+  },
+  "efficientnet_b0": {
+    "label": "EfficientNet-B0 U-Net",
+    "test_cases": ["2_25_XY", "S_4"],
+    "foreground_iou": 0.8313,
+    "miou": 0.8543,
+    "dice": 0.9065,
+    "accuracy": 0.9233,
+    "precision": 0.9281,
+    "recall": 0.8878,
+    "parameters_million": null,
+    "conv_flops_giga": null,
+    "flops_input": null,
+    "infer_sec_per_case": 11.16,
+    "speed_note": "NVIDIA GPU PC model was not recorded. Accuracy and mIoU are reconstructed approximately from rounded per-case metrics and audited foreground ratios; this test uses S_4 instead of S_3."
+  }
+}

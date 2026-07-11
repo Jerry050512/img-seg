@@ -13,16 +13,14 @@
 #let paper-gold = rgb("fff8e8")
 #let paper-red = rgb("fff2ef")
 
-// English is shaped with Libertinus Serif. CJK glyphs follow the requested
-// fallback route when the preferred LXGW WenKai family is unavailable.
+// English uses Libertinus Serif; the Noto CJK families keep Linux builds reproducible.
 #let cjk-fonts = (
-  "LXGW WenKai",
-  "Songti SC",
-  "Source Han Serif",
-  "SimSun",
-  "Microsoft YaHei",
+  "Noto Serif CJK SC",
+  "Noto Serif CJK JP",
 )
 #let body-fonts = ("Libertinus Serif", ..cjk-fonts)
+#let sans-fonts = ("Noto Sans CJK SC", "Noto Sans CJK JP", "DejaVu Sans")
+#let mono-fonts = ("DejaVu Sans Mono",)
 
 #let academic-report(
   title: "课程实验报告",
@@ -83,9 +81,9 @@
     stroke: 0.5pt + rule,
     inset: 9pt,
     radius: 4pt,
-    text(font: "Consolas", size: 8.1pt, fill: navy)[#it],
+    text(font: mono-fonts, size: 8.1pt, fill: navy)[#it],
   )
-  show raw.where(block: false): set text(font: "Consolas", size: 0.88em, fill: blue)
+  show raw.where(block: false): set text(font: mono-fonts, size: 0.88em, fill: blue)
   show heading.where(level: 1): it => {
     v(0.15cm)
     block(
@@ -122,9 +120,9 @@
   inset: 12pt,
   radius: 7pt,
 )[
-  #text(font: "Microsoft YaHei", size: 18pt, fill: teal, weight: "bold")[#value]
+  #text(font: sans-fonts, size: 18pt, fill: teal, weight: "bold")[#value]
   #v(2pt)
-  #text(font: "Microsoft YaHei", size: 7.8pt, fill: muted, weight: "medium")[#label]
+  #text(font: sans-fonts, size: 7.8pt, fill: muted, weight: "medium")[#label]
 ]
 
 #let cover(
@@ -147,42 +145,42 @@
       rows: (auto, 1fr, auto),
       row-gutter: 1cm,
       box(height: 2.0cm)[
-        #text(font: "Microsoft YaHei", size: 10pt, fill: muted, weight: "bold", tracking: 0.08em)[COURSE PROJECT · TECHNICAL REPORT]
+        #text(font: sans-fonts, size: 10pt, fill: muted, weight: "bold", tracking: 0.08em)[COURSE PROJECT · TECHNICAL REPORT]
         #v(8pt)
-        #text(font: "Microsoft YaHei", size: 15pt, fill: navy, weight: "bold")[#course]
+        #text(font: sans-fonts, size: 15pt, fill: navy, weight: "bold")[#course]
       ],
       box(height: 19.2cm)[
         #v(2.25cm)
         #box(fill: navy, inset: (x: 11pt, y: 5pt), radius: 3pt)[
-          #text(font: "Microsoft YaHei", size: 8.5pt, fill: white, weight: "bold")[#status]
+          #text(font: sans-fonts, size: 8.5pt, fill: white, weight: "bold")[#status]
         ]
         #v(0.7cm)
-        #text(font: "Microsoft YaHei", size: 31pt, fill: navy, weight: "bold")[#title]
+        #text(font: sans-fonts, size: 31pt, fill: navy, weight: "bold")[#title]
         #v(0.42cm)
         #line(length: 3.2cm, stroke: 2pt + teal)
         #v(0.55cm)
-        #text(font: "SimSun", size: 14pt, fill: blue)[#subtitle]
+        #text(font: cjk-fonts, size: 14pt, fill: blue)[#subtitle]
         #v(1.2cm)
         #grid(
           columns: (1fr, 1fr, 1fr),
           gutter: 8pt,
           stat-card("13", "NIfTI cases"),
           stat-card("3", "model families"),
-          stat-card("0.9490", "nnU-Net test Dice"),
+          stat-card("0.9555", "best test Dice"),
         )
       ],
       grid(
         columns: (1fr, 1fr),
         gutter: 1cm,
         [
-          #text(font: "Microsoft YaHei", size: 8pt, fill: muted, weight: "bold")[PROJECT TEAM]
+          #text(font: sans-fonts, size: 8pt, fill: muted, weight: "bold")[PROJECT TEAM]
           #v(5pt)
-          #text(font: "Microsoft YaHei", size: 11pt, fill: navy, weight: "bold")[#team]
+          #text(font: sans-fonts, size: 11pt, fill: navy, weight: "bold")[#team]
         ],
         align(right)[
-          #text(font: "Microsoft YaHei", size: 8pt, fill: muted, weight: "bold")[REPORT DATE]
+          #text(font: sans-fonts, size: 8pt, fill: muted, weight: "bold")[REPORT DATE]
           #v(5pt)
-          #text(font: "Microsoft YaHei", size: 11pt, fill: navy, weight: "bold")[#date]
+          #text(font: sans-fonts, size: 11pt, fill: navy, weight: "bold")[#date]
         ],
       ),
     )
@@ -206,7 +204,7 @@
     radius: (right: 5pt),
   )[
     #set par(first-line-indent: 0pt)
-    #text(font: "Microsoft YaHei", size: 9.5pt, fill: palette.at(2), weight: "bold")[#title]
+    #text(font: sans-fonts, size: 9.5pt, fill: palette.at(2), weight: "bold")[#title]
     #v(4pt)
     #text(size: 9.2pt)[#body]
   ]
@@ -216,7 +214,7 @@
   fill: tone.lighten(78%),
   inset: (x: 6pt, y: 3pt),
   radius: 3pt,
-  text(font: "Microsoft YaHei", size: 7.6pt, fill: tone.darken(25%), weight: "bold")[#body],
+  text(font: sans-fonts, size: 7.6pt, fill: tone.darken(25%), weight: "bold")[#body],
 )
 
 #let table-head(body) = text(font: cjk-fonts, size: 8.2pt, fill: white, weight: "bold")[#body]

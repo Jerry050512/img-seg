@@ -1,4 +1,4 @@
-"""Generate report figures from the latest local nnU-Net experiment artifacts.
+"""Generate report figures from the available three-model experiment artifacts.
 
 Run from the repository root with::
 
@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 import nibabel as nib
 import numpy as np
 import pandas as pd
@@ -22,7 +23,16 @@ import torch
 plt.switch_backend("Agg")
 
 
-plt.rcParams["font.family"] = ["Microsoft YaHei", "DejaVu Sans"]
+available_fonts = {font.name for font in font_manager.fontManager.ttflist}
+cjk_font = next(
+    (
+        name
+        for name in ("Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans CJK JP", "DejaVu Sans")
+        if name in available_fonts
+    ),
+    "DejaVu Sans",
+)
+plt.rcParams["font.family"] = [cjk_font, "DejaVu Sans"]
 plt.rcParams["axes.unicode_minus"] = False
 
 
@@ -32,6 +42,10 @@ RUN_ID = "nnunet_v2_2d_fold0_200epochs_20260710_114102"
 REPORT_DIR = ROOT / "outputs" / "reports" / RUN_ID
 PRED_DIR = ROOT / "outputs" / f"{RUN_ID}_best"
 TEST_DIR = ROOT / "dataset" / "processed" / "nnunet_raw" / "Dataset501_ImgSeg"
+SEGRESNET_HISTORY = ROOT / "outputs" / "monai_segresnet" / "history.json"
+SEGRESNET_PRED_DIR = ROOT / "outputs" / "monai_segresnet" / "test_predictions"
+SEGRESNET_TEST_DIR = ROOT / "dataset"
+COMPARISON_PATH = ASSETS / "model_comparison.json"
 PLANS_PATH = (
     ROOT
     / "checkpoints"
@@ -179,6 +193,39 @@ def generate_bad_cases() -> None:
         handle.write("\n")
 
 
+def generate_segresnet_bad_cases() -> None:
+    outputs: list[tuple[str, str, int, str]] = []
+    for case_id in ("S_3", "2_25_XY"):
+        image = _load(SEGRESNET_TEST_DIR / case_id / "image.nii.gz")
+        reference = _load(SEGRESNET_TEST_DIR / case_id / "mask.nii.gz") > 0
+        prediction = _load(SEGRESNET_PRED_DIR / f"{case_id}.nii.gz") > 0
+        for category, index in _select_slices(case_id, reference, prediction):
+            output_name = f"segresnet_case_{len(outputs) + 1}.png"
+            _draw_bad_case(
+                case_id,
+                category,
+                index,
+                image,
+                reference,
+                prediction,
+                output_name,
+            )
+            outputs.append((case_id, category, index, output_name))
+        del image, reference, prediction
+
+    with (ASSETS / "segresnet_case_slices.json").open("w", encoding="utf-8") as handle:
+        json.dump(
+            [
+                {"case_id": case_id, "category": category, "slice": index, "asset": asset}
+                for case_id, category, index, asset in outputs
+            ],
+            handle,
+            ensure_ascii=False,
+            indent=2,
+        )
+        handle.write("\n")
+
+
 def generate_training_curves() -> None:
     frame = pd.read_csv(REPORT_DIR / "epoch_metrics.csv")
     fig, axes = plt.subplots(1, 2, figsize=(11.8, 4.2), dpi=180)
@@ -207,43 +254,73 @@ def generate_training_curves() -> None:
     plt.close(fig)
 
 
+def generate_segresnet_training_curve() -> None:
+    history = json.loads(SEGRESNET_HISTORY.read_text(encoding="utf-8"))
+    epochs = [row["epoch"] for row in history]
+    losses = [row["train_loss"] for row in history]
+    validation = [row for row in history if "validation" in row]
+    val_epochs = [row["epoch"] for row in validation]
+    val_dice = [row["validation"]["summary"]["dice"] for row in validation]
+    best_index = int(np.argmax(val_dice))
+
+    fig, axes = plt.subplots(1, 2, figsize=(11.8, 4.2), dpi=180)
+    axes[0].plot(epochs, losses, color=COLORS["blue"], lw=1.15)
+    smoothed = pd.Series(losses).rolling(10, min_periods=1, center=True).mean()
+    axes[0].plot(epochs, smoothed, color=COLORS["gold"], lw=2, label="10-epoch mean")
+    axes[0].set(title="SegResNet training loss", xlabel="Epoch", ylabel="Dice + BCE loss")
+    axes[0].legend(frameon=False, fontsize=8)
+
+    axes[1].plot(val_epochs, val_dice, color=COLORS["teal"], marker="o", ms=3, lw=1.4)
+    axes[1].scatter(
+        [val_epochs[best_index]], [val_dice[best_index]], color=COLORS["red"], s=35, zorder=3
+    )
+    axes[1].annotate(
+        f"best {val_dice[best_index]:.4f}",
+        (val_epochs[best_index], val_dice[best_index]),
+        xytext=(-42, 15),
+        textcoords="offset points",
+        fontsize=8,
+    )
+    axes[1].set(
+        title="SegResNet validation Dice",
+        xlabel="Epoch",
+        ylabel="Dice",
+        ylim=(0.55, 0.86),
+    )
+    for ax in axes:
+        ax.grid(alpha=0.18)
+        ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(ASSETS / "segresnet_training_curve.png", bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+
+
 def generate_radar() -> None:
-    metric_path = PRED_DIR / "metrics.json"
-    payload = json.loads(metric_path.read_text(encoding="utf-8"))
-    summary = payload["summary"]
-    cases = payload["cases"]
-    accuracy = np.mean(
-        [
-            (case["tp"] + case["tn"]) / (case["tp"] + case["fp"] + case["fn"] + case["tn"])
-            for case in cases.values()
-        ]
-    )
-    mean_iou = np.mean(
-        [
-            (
-                case["tp"] / (case["tp"] + case["fp"] + case["fn"])
-                + case["tn"] / (case["tn"] + case["fp"] + case["fn"])
-            )
-            / 2
-            for case in cases.values()
-        ]
-    )
+    comparison = json.loads(COMPARISON_PATH.read_text(encoding="utf-8"))
     labels = ["mIoU", "Dice", "Accuracy", "Precision", "Recall"]
-    values = [mean_iou, summary["dice"], accuracy, summary["precision"], summary["recall"]]
     angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False).tolist()
     angles += angles[:1]
-    values += values[:1]
 
-    fig = plt.figure(figsize=(6.2, 5.2), dpi=180)
+    fig = plt.figure(figsize=(7.2, 5.6), dpi=180)
     ax = fig.add_subplot(111, polar=True)
-    ax.plot(angles, values, color=COLORS["teal"], linewidth=2)
-    ax.fill(angles, values, color=COLORS["teal"], alpha=0.22)
+    styles = [
+        ("nnunet_v2", COLORS["blue"]),
+        ("monai_segresnet", COLORS["teal"]),
+        ("efficientnet_b0", COLORS["orange"]),
+    ]
+    for key, color in styles:
+        row = comparison[key]
+        values = [row["miou"], row["dice"], row["accuracy"], row["precision"], row["recall"]]
+        values += values[:1]
+        ax.plot(angles, values, color=color, linewidth=1.8, label=row["label"])
+        ax.fill(angles, values, color=color, alpha=0.08)
     ax.set_xticks(angles[:-1], labels)
     ax.set_ylim(0.75, 1.0)
     ax.set_yticks([0.80, 0.85, 0.90, 0.95, 1.00])
     ax.set_yticklabels([".80", ".85", ".90", ".95", "1.0"], fontsize=7, color=COLORS["gray"])
     ax.grid(alpha=0.25)
-    ax.set_title("nnU-Net test-set profile", pad=20, color=COLORS["navy"], fontweight="bold")
+    ax.set_title("Three-model test profile", pad=20, color=COLORS["navy"], fontweight="bold")
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.04), frameon=False, fontsize=8)
     fig.tight_layout()
     fig.savefig(ASSETS / "metric_radar.png", bbox_inches="tight", facecolor="white")
     plt.close(fig)
@@ -308,12 +385,69 @@ def measure_network() -> None:
         handle.write("\n")
 
 
+def measure_segresnet_network() -> None:
+    from monai.networks.nets import SegResNet
+
+    model = SegResNet(
+        spatial_dims=3,
+        in_channels=1,
+        out_channels=1,
+        init_filters=16,
+        blocks_down=(1, 2, 2, 4),
+        blocks_up=(1, 1, 1),
+        dropout_prob=0.1,
+        norm="INSTANCE",
+    ).eval()
+    flops = 0
+
+    def count_conv(
+        module: torch.nn.Module,
+        inputs: tuple[torch.Tensor, ...],
+        output: torch.Tensor,
+    ) -> None:
+        nonlocal flops
+        kernel = int(np.prod(module.kernel_size))
+        if isinstance(module, torch.nn.ConvTranspose3d):
+            multiply_adds = int(inputs[0].numel()) * kernel * module.out_channels // module.groups
+        else:
+            multiply_adds = int(output.numel()) * kernel * module.in_channels // module.groups
+        flops += 2 * multiply_adds + (int(output.numel()) if module.bias is not None else 0)
+
+    handles = [
+        module.register_forward_hook(count_conv)
+        for module in model.modules()
+        if isinstance(module, (torch.nn.Conv3d, torch.nn.ConvTranspose3d))
+    ]
+    with torch.inference_mode():
+        model(torch.zeros(1, 1, 96, 96, 64))
+    for handle in handles:
+        handle.remove()
+    params = sum(parameter.numel() for parameter in model.parameters())
+    payload = {
+        "input": [1, 1, 96, 96, 64],
+        "parameters": params,
+        "parameters_million": params / 1e6,
+        "conv_flops": flops,
+        "conv_flops_giga": flops / 1e9,
+        "counting_convention": (
+            "one multiply and one add are counted as two FLOPs; "
+            "3D convolution and transposed convolution only"
+        ),
+    }
+    with (ASSETS / "segresnet_complexity.json").open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+        handle.write("\n")
+
+
 def main() -> None:
     ASSETS.mkdir(parents=True, exist_ok=True)
     generate_training_curves()
+    generate_segresnet_training_curve()
     generate_radar()
     generate_bad_cases()
+    generate_segresnet_bad_cases()
     measure_network()
+    measure_segresnet_network()
     print(f"Generated report assets in {ASSETS}")
 
 
