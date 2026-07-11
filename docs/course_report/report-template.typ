@@ -48,7 +48,7 @@
           columns: (1fr, auto),
           align: (left, right),
           text(size: 8.3pt, fill: muted, weight: "medium")[#short-title],
-          text(size: 8.3pt, fill: muted)[人工智能综合课程实践实验报告 · 2026],
+          text(size: 8.3pt, fill: muted)[人工智能综合课程实践实验报告],
         )
         v(4pt)
         line(length: 100%, stroke: 0.55pt + rule)
@@ -108,7 +108,7 @@
     ]
   }
   show heading.where(level: 2): it => block()[
-    #box(width: 4pt, height: 1.05em, fill: teal, radius: 1.5pt)
+    #box(width: 3.5pt, height: 0.8em, fill: teal, radius: 1.5pt)
     #text(size: 13.5pt, fill: navy, weight: "bold")[#counter(heading).display() #it.body]
   ]
   show heading.where(level: 3): it => block(
@@ -189,7 +189,7 @@
           #text(font: sans-fonts, size: 11pt, fill: navy, weight: "bold")[#team]
         ],
         align(right)[
-          #text(font: sans-fonts, size: 8pt, fill: muted, weight: "bold")[REPORT DATE]
+          #text(font: sans-fonts, size: 8pt, fill: muted, weight: "bold")[REPORT VERSION]
           #v(5pt)
           #text(font: sans-fonts, size: 11pt, fill: navy, weight: "bold")[#date]
         ],

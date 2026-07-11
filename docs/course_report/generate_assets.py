@@ -376,10 +376,12 @@ def generate_radar() -> None:
         ax.fill(angles, values, color=color, alpha=0.08)
     ax.set_xticks(angles[:-1], labels)
     ax.set_ylim(0.75, 1.0)
-    ax.set_yticks([0.80, 0.85, 0.90, 0.95, 1.00])
-    ax.set_yticklabels([".80", ".85", ".90", ".95", "1.0"], fontsize=7, color=COLORS["gray"])
-    ax.grid(alpha=0.25)
-    ax.set_title("Three-model test profile", pad=20, color=COLORS["navy"], fontweight="bold")
+    ax.set_yticks([0.80, 0.85, 0.90, 0.95])
+    ax.set_yticklabels([".80", ".85", ".90", ".95"], fontsize=7, color=COLORS["gray"])
+    ax.grid(alpha=0.22, linewidth=0.7)
+    ax.spines["polar"].set_visible(False)
+    ax.patch.set_edgecolor("none")
+    ax.set_title("Three-model test profile", pad=20, color=COLORS["navy"], fontweight="normal")
     ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.04), frameon=False, fontsize=8)
     fig.tight_layout()
     fig.savefig(ASSETS / "metric_radar.png", bbox_inches="tight", facecolor="white")
@@ -510,6 +512,73 @@ def measure_segresnet_network() -> None:
         handle.write("\n")
 
 
+def measure_efficientnet_network() -> None:
+    """Measure the configured EfficientNet-B0 U-Net on one 512x512 slice."""
+
+    import segmentation_models_pytorch as smp
+
+    model = smp.Unet(
+        encoder_name="efficientnet-b0",
+        encoder_weights=None,
+        in_channels=1,
+        classes=1,
+    ).eval()
+    flops = 0
+
+    def count_conv(
+        module: torch.nn.Module,
+        inputs: tuple[torch.Tensor, ...],
+        output: torch.Tensor,
+    ) -> None:
+        nonlocal flops
+        kernel = int(np.prod(module.kernel_size))
+        if isinstance(module, torch.nn.ConvTranspose2d):
+            multiply_adds = (
+                int(inputs[0].numel()) * kernel * module.out_channels // module.groups
+            )
+        else:
+            multiply_adds = int(output.numel()) * kernel * module.in_channels // module.groups
+        flops += 2 * multiply_adds + (int(output.numel()) if module.bias is not None else 0)
+
+    handles = [
+        module.register_forward_hook(count_conv)
+        for module in model.modules()
+        if isinstance(module, (torch.nn.Conv2d, torch.nn.ConvTranspose2d))
+    ]
+    with torch.inference_mode():
+        model(torch.zeros(1, 1, 512, 512))
+    for handle in handles:
+        handle.remove()
+    params = sum(parameter.numel() for parameter in model.parameters())
+    payload = {
+        "input": [1, 1, 512, 512],
+        "parameters": params,
+        "parameters_million": params / 1e6,
+        "conv_flops": flops,
+        "conv_flops_giga": flops / 1e9,
+        "counting_convention": (
+            "one multiply and one add are counted as two FLOPs; "
+            "2D convolution and transposed convolution only"
+        ),
+    }
+    with (ASSETS / "efficientnet_b0_complexity.json").open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+        handle.write("\n")
+
+    comparison = json.loads(COMPARISON_PATH.read_text(encoding="utf-8"))
+    comparison["efficientnet_b0"].update(
+        {
+            "parameters_million": payload["parameters_million"],
+            "conv_flops_giga": payload["conv_flops_giga"],
+            "flops_input": "1x1x512x512",
+        }
+    )
+    COMPARISON_PATH.write_text(
+        json.dumps(comparison, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -532,6 +601,7 @@ def main(argv: list[str] | None = None) -> None:
     generate_segresnet_bad_cases()
     measure_network()
     measure_segresnet_network()
+    measure_efficientnet_network()
     print(f"Generated report assets in {ASSETS}")
 
 

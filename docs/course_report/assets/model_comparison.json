@@ -1,10 +1,13 @@
 {
   "nnunet_v2": {
     "label": "nnU-Net v2 2D",
-    "test_cases": ["2_25_XY", "S_3"],
+    "test_cases": [
+      "2_25_XY",
+      "S_3"
+    ],
     "foreground_iou": 0.9048,
     "miou": 0.9192,
-    "dice": 0.9490,
+    "dice": 0.949,
     "accuracy": 0.9587,
     "precision": 0.9581,
     "recall": 0.9405,
@@ -16,8 +19,11 @@
   },
   "monai_segresnet": {
     "label": "MONAI SegResNet 3D",
-    "test_cases": ["2_25_XY", "S_3"],
-    "foreground_iou": 0.9156526990,
+    "test_cases": [
+      "2_25_XY",
+      "S_3"
+    ],
+    "foreground_iou": 0.915652699,
     "miou": 0.9269482406,
     "dice": 0.9555323221,
     "accuracy": 0.9627446732,
@@ -45,16 +51,19 @@
       ],
       "raw_local_records_committed": false
     },
-    "test_cases": ["2_25_XY", "S_4"],
+    "test_cases": [
+      "2_25_XY",
+      "S_4"
+    ],
     "foreground_iou": 0.8313,
     "miou": 0.8543,
     "dice": 0.9065,
     "accuracy": 0.9233,
     "precision": 0.9281,
     "recall": 0.8878,
-    "parameters_million": null,
-    "conv_flops_giga": null,
-    "flops_input": null,
+    "parameters_million": 6.250893,
+    "conv_flops_giga": 23.583590524,
+    "flops_input": "1x1x512x512",
     "infer_sec_per_case": 11.16,
     "speed_note": "NVIDIA GPU PC model was not recorded. Accuracy and mIoU are reconstructed approximately from rounded per-case metrics and audited foreground ratios; this test uses S_4 instead of S_3."
   }
