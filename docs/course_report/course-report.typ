@@ -34,7 +34,7 @@ nnU-Net v2、MONAI SegResNet 和 EfficientNet-B0 U-Net 的测试宏平均 Dice �
 #outline(title: [目录], indent: auto, depth: 2)
 #pagebreak()
 #set text(size: 10.2pt)
-#set par(first-line-indent: 2em, leading: 0.74em)
+#set par(leading: 0.74em)
 
 #heading(level: 1, numbering: none)[项目分工]
 
@@ -270,7 +270,7 @@ Windows 图形驱动环境下可用显存和连续内存分配并不总是一致
 
 项目统一使用 `uv` 管理 Python 3.12 环境和命令。核心依赖包括 PyTorch、nnU-Net v2、MONAI、segmentation-models-pytorch、nibabel、Albumentations、Matplotlib 与 Gradio。超参数位于 `configs/<model>/`，训练脚本必须接收配置文件路径，不在代码中硬编码数据和输出路径。
 
-== nnU-Net 训练过程
+== 训练过程
 
 nnU-Net 完成 200/200 epoch，墙钟训练时长约 8 h 27 min。大尺寸标签在标准预处理的前景坐标物化阶段消耗过多主存，因此实验使用有界内存采样完成 11 个 train/validation case 的预处理。训练采用单数据增强进程，降低 Windows shared-memory 不稳定性。
 
@@ -282,8 +282,6 @@ uv run imgseg-nnunet --config configs/nnunet_v2/base.yaml prepare
 uv run imgseg-nnunet --config configs/nnunet_v2/base.yaml plan
 uv run imgseg-nnunet --config configs/nnunet_v2/base.yaml train --configuration 2d --fold 0
 ```
-
-== SegResNet 与 EfficientNet 训练过程
 
 SegResNet 完成 200 epoch，并通过 `last.pt` 两次断点恢复。日志内训练循环累计 1303.3 s、20 次完整验证累计 935.5 s，合计可计量计算时间 2238.8 s（约 37.3 min）；该值不含三次 NIfTI cache 重建、中断等待和进程迁移，因此不是严格墙钟总时长。训练 loss 的 10-epoch 移动平均总体下降，验证 Dice 从 epoch 5 的 0.5938 上升至 epoch 170 的 0.8261，此后在 0.80 左右波动，故选择 epoch 170 而非 epoch 200。
 
@@ -321,7 +319,7 @@ uv run imgseg-webui
 
 普通 2D 图片被包装为单通道单 slice 的临时 NIfTI，使用 identity affine，因此该输出只表达像素空间分割，不代表真实物理坐标。课程展示时应明确这一限制。
 
-当前 WebUI 已统一接入三个模型。公共输入收集器同时修正了 `case/image.nii.gz` 布局的 case id 推导，使其能与同目录 `mask.nii.gz` 正确配对。针对 Gradio 只按最后一段后缀校验、从而把合法 `.nii.gz` 误判为不支持 `.gz` 的上传问题，界面层改为接受通用文件，再由后端统一 allowlist 校验完整复合后缀；模型切换只改变配置、checkpoint 枚举和批处理后端，不改变界面与评价逻辑。
+当前 WebUI 已统一接入三个模型。公共输入收集器同时修正了 `case/image.nii.gz` 布局的 case id 推导，使其能与同目录 `mask.nii.gz` 正确配对。
 
 #figure(
   image("assets/web-ui.png", width: 100%),
