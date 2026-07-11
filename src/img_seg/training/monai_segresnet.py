@@ -94,7 +94,9 @@ def load_data(config: dict[str, Any]) -> SegResNetData:
     if set(assigned) != all_ids:
         missing = sorted(all_ids - set(assigned))
         raise ValueError(f"Split does not assign every dataset case: {missing}")
-    return SegResNetData(cases=cases, split=split)
+    data = SegResNetData(cases=cases, split=split)
+    _validate_training_roi(data.cases_for("train"), deep_get(config, "data.roi_size"))
+    return data
 
 
 def _validate_case_geometries(
@@ -117,6 +119,20 @@ def _validate_case_geometries(
                     f"Unexpected spacing for {case.case_id}: {spacing}; "
                     f"expected {tuple(expected_spacing)}"
                 )
+
+
+def _validate_training_roi(
+    cases: list[SegmentationCase], roi_size: list[int]
+) -> None:
+    nib = require_nibabel()
+    roi = tuple(int(value) for value in roi_size)
+    for case in cases:
+        shape = tuple(int(value) for value in nib.load(str(case.image_path)).shape[:3])
+        if any(size < required for size, required in zip(shape, roi, strict=True)):
+            raise ValueError(
+                f"Training volume {case.case_id} has shape {shape}, smaller than "
+                f"data.roi_size={roi}; reduce roi_size or pad the input volume"
+            )
 
 
 def _binarize_label(value: Any) -> Any:
@@ -237,24 +253,6 @@ def build_loss(config: dict[str, Any]) -> Any:
     raise ValueError(f"Unsupported training.loss: {loss_name}")
 
 
-def _metric_row(prediction: Any, target: Any) -> dict[str, float]:
-    pred = prediction.bool()
-    truth = target.bool()
-    tp = int((pred & truth).sum().item())
-    fp = int((pred & ~truth).sum().item())
-    fn = int((~pred & truth).sum().item())
-
-    def divide(numerator: int, denominator: int) -> float:
-        return numerator / denominator if denominator else 1.0
-
-    return {
-        "dice": divide(2 * tp, 2 * tp + fp + fn),
-        "iou": divide(tp, tp + fp + fn),
-        "precision": divide(tp, tp + fp),
-        "recall": divide(tp, tp + fn),
-    }
-
-
 def validate(model: Any, loader: Any, config: dict[str, Any], device: Any) -> dict[str, Any]:
     runtime = _require_training_runtime()
     torch = runtime["torch"]
@@ -262,7 +260,7 @@ def validate(model: Any, loader: Any, config: dict[str, Any], device: Any) -> di
     roi_size = tuple(int(v) for v in deep_get(config, "data.roi_size"))
     threshold = float(deep_get(config, "inference.threshold", 0.5))
     use_amp = bool(deep_get(config, "training.amp", True)) and device.type == "cuda"
-    case_rows: dict[str, dict[str, float]] = {}
+    case_rows: dict[str, dict[str, Any]] = {}
     started = time.perf_counter()
     with torch.inference_mode():
         for batch in loader:
@@ -282,7 +280,11 @@ def validate(model: Any, loader: Any, config: dict[str, Any], device: Any) -> di
                     device=torch.device("cpu"),
                 )
             prediction = torch.sigmoid(logits) >= threshold
-            case_rows[case_id] = _metric_row(prediction, batch["label"] > 0)
+            metrics = binary_metrics(
+                prediction.detach().cpu().numpy(),
+                (batch["label"] > 0).detach().cpu().numpy(),
+            )
+            case_rows[case_id] = metrics.as_dict()
     elapsed = time.perf_counter() - started
     if not case_rows:
         raise ValueError("Validation split is empty")
@@ -320,6 +322,13 @@ def _save_checkpoint(
     }
     temporary = path.with_suffix(path.suffix + ".tmp")
     runtime["torch"].save(payload, temporary)
+    os.replace(temporary, path)
+
+
+def _write_json_atomic(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     os.replace(temporary, path)
 
 
@@ -440,6 +449,8 @@ def train(
                     best_dice=best_dice,
                     config=config,
                 )
+        history.append(row)
+        _write_json_atomic(history_path, history)
         _save_checkpoint(
             checkpoint_dir / "last.pt",
             model=model,
@@ -450,8 +461,6 @@ def train(
             best_dice=best_dice,
             config=config,
         )
-        history.append(row)
-        history_path.write_text(json.dumps(history, indent=2) + "\n", encoding="utf-8")
         validation_text = ""
         if "validation" in row:
             validation_text = f", val_dice={row['validation']['summary']['dice']:.4f}"

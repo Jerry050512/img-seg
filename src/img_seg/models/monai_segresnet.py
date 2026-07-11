@@ -16,17 +16,18 @@ MODEL_KEY = "monai_segresnet"
 DEFAULT_CONFIG_PATH = Path("configs/monai_segresnet/base.yaml")
 
 
-def _require_runtime() -> tuple[Any, Any, Any]:
+def _require_runtime() -> tuple[Any, Any, Any, Any]:
     try:
         import torch
         from monai.inferers import sliding_window_inference
         from monai.networks.nets import SegResNet
+        from monai.transforms import NormalizeIntensity
     except ImportError as exc:
         raise RuntimeError(
             "PyTorch and MONAI are required for SegResNet. "
             "Install project dependencies with `uv sync`."
         ) from exc
-    return torch, sliding_window_inference, SegResNet
+    return torch, sliding_window_inference, SegResNet, NormalizeIntensity
 
 
 def load_monai_config(config_path: str | Path = DEFAULT_CONFIG_PATH) -> dict[str, Any]:
@@ -42,11 +43,26 @@ def load_monai_config(config_path: str | Path = DEFAULT_CONFIG_PATH) -> dict[str
         raise ValueError("Current NIfTI workflow requires model.in_channels=1")
     if int(deep_get(config, "model.out_channels", 1)) != 1:
         raise ValueError("Binary segmentation requires model.out_channels=1")
+    init_filters = int(deep_get(config, "model.init_filters", 16))
+    if init_filters <= 0:
+        raise ValueError("model.init_filters must be positive")
+    blocks_down = deep_get(config, "model.blocks_down", [1, 2, 2, 4])
+    blocks_up = deep_get(config, "model.blocks_up", [1, 1, 1])
+    if not isinstance(blocks_down, (list, tuple)) or not blocks_down:
+        raise ValueError("model.blocks_down must contain positive integers")
+    if not isinstance(blocks_up, (list, tuple)):
+        raise ValueError("model.blocks_up must contain positive integers")
+    if any(int(value) <= 0 for value in (*blocks_down, *blocks_up)):
+        raise ValueError("model.blocks_down and model.blocks_up must be positive")
+    if len(blocks_up) != len(blocks_down) - 1:
+        raise ValueError(
+            "model.blocks_up must have exactly one fewer level than model.blocks_down"
+        )
     return config
 
 
 def resolve_device(requested: str = "auto") -> Any:
-    torch, _, _ = _require_runtime()
+    torch, _, _, _ = _require_runtime()
     requested = requested.lower()
     if requested == "auto":
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -57,7 +73,7 @@ def resolve_device(requested: str = "auto") -> Any:
 
 
 def build_model(config: dict[str, Any]) -> Any:
-    _, _, segresnet_class = _require_runtime()
+    _, _, segresnet_class, _ = _require_runtime()
     model_config = config.get("model", {})
     return segresnet_class(
         spatial_dims=int(model_config.get("spatial_dims", 3)),
@@ -71,29 +87,16 @@ def build_model(config: dict[str, Any]) -> Any:
     )
 
 
-def normalize_nonzero(image: np.ndarray) -> np.ndarray:
-    """Match MONAI NormalizeIntensity(nonzero=True) for one-channel volumes."""
+def normalize_image(image: np.ndarray, *, nonzero: bool) -> np.ndarray:
+    """Apply the same MONAI intensity transform used by the training pipeline."""
 
-    output = np.asarray(image, dtype=np.float32).copy()
-    finite = np.isfinite(output)
-    output[~finite] = 0.0
-    selected = finite & (output != 0)
-    if not np.any(selected):
-        selected = finite
-    if not np.any(selected):
-        return np.zeros_like(output, dtype=np.float32)
-    values = output[selected]
-    mean = float(values.mean())
-    std = float(values.std())
-    if std > 1e-8:
-        output[selected] = (values - mean) / std
-    else:
-        output[selected] = values - mean
-    return output
+    _, _, _, normalize_intensity = _require_runtime()
+    transform = normalize_intensity(nonzero=nonzero)
+    return np.asarray(transform(np.asarray(image, dtype=np.float32)), dtype=np.float32)
 
 
 def checkpoint_payload(checkpoint_path: str | Path, device: Any) -> dict[str, Any]:
-    torch, _, _ = _require_runtime()
+    torch, _, _, _ = _require_runtime()
     path = resolve_project_path(checkpoint_path)
     if not path.is_file():
         raise FileNotFoundError(f"SegResNet checkpoint does not exist: {path}")
@@ -135,8 +138,11 @@ class MonaiSegResNetSegmenter:
         if image.ndim != 3:
             raise ValueError(f"Expected a 3D NIfTI volume, got shape {image.shape}")
 
-        torch, sliding_window_inference, _ = _require_runtime()
-        normalized = normalize_nonzero(image)
+        torch, sliding_window_inference, _, _ = _require_runtime()
+        normalized = normalize_image(
+            image,
+            nonzero=bool(deep_get(self.config, "data.normalize_nonzero", True)),
+        )
         inputs = torch.from_numpy(normalized[None, None])
         roi_size = tuple(int(v) for v in deep_get(self.config, "data.roi_size"))
         sw_batch_size = int(deep_get(self.config, "inference.sliding_window_batch_size", 1))
@@ -167,15 +173,18 @@ class MonaiSegResNetSegmenter:
         image_path = resolve_project_path(image_path)
         output_path = resolve_project_path(output_path)
         image, reference = load_nifti_array(image_path)
+        torch, _, _, _ = _require_runtime()
         if self.device.type == "cuda":
-            _require_runtime()[0].cuda.synchronize(self.device)
+            torch.cuda.synchronize(self.device)
         started = time.perf_counter()
         prediction = self._predict_array(np.asarray(image))
         if self.device.type == "cuda":
-            _require_runtime()[0].cuda.synchronize(self.device)
+            torch.cuda.synchronize(self.device)
         elapsed = time.perf_counter() - started
         save_like(reference, prediction, output_path)
         case_id = image_path.name.removesuffix(".nii.gz").removesuffix(".nii")
+        if case_id.lower() in {"image", "volume"}:
+            case_id = image_path.parent.name
         return {
             "case_id": case_id,
             "output_path": str(output_path),

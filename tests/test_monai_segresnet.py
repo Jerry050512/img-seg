@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import nibabel as nib
@@ -11,8 +12,14 @@ from img_seg.models.monai_segresnet import (
     MonaiSegResNetSegmenter,
     build_model,
     load_monai_config,
+    normalize_image,
 )
-from img_seg.training.monai_segresnet import evaluate_split, load_data, predict_split
+from img_seg.training.monai_segresnet import (
+    _write_json_atomic,
+    evaluate_split,
+    load_data,
+    predict_split,
+)
 
 
 def write_nifti(path: Path, data: np.ndarray, affine: np.ndarray | None = None) -> None:
@@ -96,6 +103,49 @@ def test_load_monai_config_and_explicit_case_split(tmp_path: Path) -> None:
     assert data.split.test == ["case_test"]
 
 
+def test_load_monai_config_rejects_mismatched_architecture(tmp_path: Path) -> None:
+    config_path = write_tiny_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["model"]["blocks_up"] = [1, 1]
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="exactly one fewer"):
+        load_monai_config(config_path)
+
+
+def test_load_data_rejects_training_volume_smaller_than_roi(tmp_path: Path) -> None:
+    config_path = write_tiny_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["data"]["roi_size"] = [9, 8, 8]
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="smaller than data.roi_size"):
+        load_data(load_monai_config(config_path))
+
+
+def test_normalize_image_uses_monai_transform() -> None:
+    pytest.importorskip("monai")
+    image = np.zeros((4, 4, 4), dtype=np.float32)
+    image[1:3, 1:3, 1:3] = np.arange(8, dtype=np.float32).reshape(2, 2, 2) + 1
+
+    normalized = normalize_image(image, nonzero=True)
+
+    assert normalized.dtype == np.float32
+    assert np.all(normalized[image == 0] == 0)
+    assert np.isclose(normalized[image != 0].mean(), 0.0, atol=1e-6)
+    assert np.isclose(normalized[image != 0].std(), 1.0, atol=1e-6)
+
+
+def test_write_json_atomic_replaces_target(tmp_path: Path) -> None:
+    target = tmp_path / "history.json"
+    target.write_text("old", encoding="utf-8")
+
+    _write_json_atomic(target, [{"epoch": 1}])
+
+    assert json.loads(target.read_text(encoding="utf-8")) == [{"epoch": 1}]
+    assert not target.with_suffix(".json.tmp").exists()
+
+
 def test_monai_segmenter_loads_checkpoint_and_preserves_nifti_geometry(tmp_path: Path) -> None:
     torch = pytest.importorskip("torch")
     pytest.importorskip("monai")
@@ -107,7 +157,7 @@ def test_monai_segmenter_loads_checkpoint_and_preserves_nifti_geometry(tmp_path:
     affine = np.diag([0.5, 0.75, 2.0, 1.0])
     image = np.zeros((8, 8, 8), dtype=np.float32)
     image[2:6, 2:6, 2:6] = 1
-    input_path = tmp_path / "input.nii.gz"
+    input_path = tmp_path / "case_direct" / "image.nii.gz"
     output_path = tmp_path / "output.nii.gz"
     write_nifti(input_path, image, affine)
 
@@ -117,6 +167,7 @@ def test_monai_segmenter_loads_checkpoint_and_preserves_nifti_geometry(tmp_path:
 
     output = nib.load(str(output_path))
     values = np.asanyarray(output.dataobj)
+    assert result["case_id"] == "case_direct"
     assert result["shape"] == [8, 8, 8]
     assert output.shape == (8, 8, 8)
     assert np.allclose(output.affine, affine)
