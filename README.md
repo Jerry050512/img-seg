@@ -64,10 +64,6 @@ uv run python train.py --model efficientnet_b0 --config configs/efficientnet_b0/
 uv run python predict.py image /data/evaluation/sample.nii.gz weight ./best_model.pth output ./result.png
 ```
 
-权重不提交 Git。交付压缩包应把选定权重复制为根目录 `best_model.pth`；当前本机
-实验权重及推荐命名见 `docs/EXPERIMENTS.md`。nnU-Net 当前最佳 checkpoint 大于课程
-规定的 200 MB 单文件限制，打包前需采用外部存储或另行导出符合课程限制的权重。
-
 ## 当前状态
 
 - 原始数据位于 `dataset/`，读取布局规则位于 `configs/data/dataset.yaml`。
