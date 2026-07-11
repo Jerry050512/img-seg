@@ -31,6 +31,20 @@
   },
   "efficientnet_b0": {
     "label": "EfficientNet-B0 U-Net",
+    "provenance": {
+      "repository": "Jerry050512/img-seg",
+      "commit": "57eec20",
+      "branch_head_at_review": "5342eda9b33569706e1833f14c12fc933d26f92d",
+      "files": [
+        "docs/EXPERIMENTS.md",
+        "docs/EFFICIENTNET_B0_WORKFLOW.md"
+      ],
+      "raw_local_records_named_by_source": [
+        "outputs/efficientnet_b0/log.json",
+        "outputs/efficientnet_b0/metrics.json"
+      ],
+      "raw_local_records_committed": false
+    },
     "test_cases": ["2_25_XY", "S_4"],
     "foreground_iou": 0.8313,
     "miou": 0.8543,

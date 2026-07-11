@@ -244,7 +244,7 @@ EfficientNet 通过复合缩放同时协调网络深度、宽度和输入分辨�
 
 #callout(
   "EfficientNet 结果口径限制",
-  [该分支记录的测试 case 为 `2_25_XY` 与 `S_4`，而另外两模型为 `2_25_XY` 与 `S_3`；GPU 型号、参数量、FLOPs 和原始混淆矩阵也未随分支交付。因此本文保留其实测基线，但不据此断言其速度最快或精度最低。],
+  [数值来自仓库提交 `57eec20` 的 `docs/EXPERIMENTS.md` 与 `docs/EFFICIENTNET_B0_WORKFLOW.md`；来源文档将原始本地记录命名为 `outputs/efficientnet_b0/log.json` 和 `metrics.json`，但二者未提交。该分支测试 case 为 `2_25_XY` 与 `S_4`，而另外两模型为 `2_25_XY` 与 `S_3`；GPU 型号、参数量、FLOPs 和原始混淆矩阵也未随分支交付。因此本文保留其实测基线，但不据此断言其速度最快或精度最低。],
   tone: "gold",
 )
 
@@ -629,7 +629,8 @@ uv run imgseg-predict --model efficientnet_b0 --config configs/efficientnet_b0/b
 == 报告构建
 
 ```powershell
-uv run python docs/course_report/generate_assets.py
+uv run python docs/course_report/generate_assets.py --run-id nnunet_v2_2d_fold0_200epochs_20260710_114102
+New-Item -ItemType Directory -Force output/pdf | Out-Null
 typst compile docs/course_report/course-report.typ output/pdf/img-seg-course-report.pdf
 pdftoppm -png output/pdf/img-seg-course-report.pdf tmp/pdfs/img-seg-course-report
 ```

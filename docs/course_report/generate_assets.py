@@ -10,7 +10,9 @@ written to ``docs/course_report/assets``.
 
 from __future__ import annotations
 
+import argparse
 import json
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -27,7 +29,17 @@ available_fonts = {font.name for font in font_manager.fontManager.ttflist}
 cjk_font = next(
     (
         name
-        for name in ("Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans CJK JP", "DejaVu Sans")
+        for name in (
+            "LXGW WenKai",
+            "Songti SC",
+            "Source Han Serif",
+            "SimSun",
+            "Microsoft YaHei",
+            "Noto Serif CJK SC",
+            "Noto Sans CJK SC",
+            "Noto Sans CJK JP",
+            "DejaVu Sans",
+        )
         if name in available_fonts
     ),
     "DejaVu Sans",
@@ -38,7 +50,8 @@ plt.rcParams["axes.unicode_minus"] = False
 
 ROOT = Path(__file__).resolve().parents[2]
 ASSETS = Path(__file__).resolve().parent / "assets"
-RUN_ID = "nnunet_v2_2d_fold0_200epochs_20260710_114102"
+DEFAULT_RUN_ID = "nnunet_v2_2d_fold0_200epochs_20260710_114102"
+RUN_ID = DEFAULT_RUN_ID
 REPORT_DIR = ROOT / "outputs" / "reports" / RUN_ID
 PRED_DIR = ROOT / "outputs" / f"{RUN_ID}_best"
 TEST_DIR = ROOT / "dataset" / "processed" / "nnunet_raw" / "Dataset501_ImgSeg"
@@ -55,6 +68,53 @@ PLANS_PATH = (
     / "nnUNetTrainer_200epochs__nnUNetPlans__2d"
     / "plans.json"
 )
+
+
+def configure_nnunet_run(run_id: str) -> None:
+    """Point report generation at a specific local nnU-Net run."""
+
+    global RUN_ID, REPORT_DIR, PRED_DIR, PLANS_PATH
+    RUN_ID = run_id
+    REPORT_DIR = ROOT / "outputs" / "reports" / run_id
+    PRED_DIR = ROOT / "outputs" / f"{run_id}_best"
+    PLANS_PATH = (
+        ROOT
+        / "checkpoints"
+        / "nnunet_v2_runs"
+        / run_id
+        / "Dataset501_ImgSeg"
+        / "nnUNetTrainer_200epochs__nnUNetPlans__2d"
+        / "plans.json"
+    )
+
+
+def require_generation_inputs() -> None:
+    required = [
+        REPORT_DIR / "epoch_metrics.csv",
+        PRED_DIR / "metrics.json",
+        PLANS_PATH,
+        SEGRESNET_HISTORY,
+        COMPARISON_PATH,
+    ]
+    for case_id in ("S_3", "2_25_XY"):
+        required.extend(
+            [
+                TEST_DIR / "imagesTs" / f"{case_id}_0000.nii.gz",
+                TEST_DIR / "labelsTs" / f"{case_id}.nii.gz",
+                PRED_DIR / f"{case_id}.nii.gz",
+                SEGRESNET_TEST_DIR / case_id / "image.nii.gz",
+                SEGRESNET_TEST_DIR / case_id / "mask.nii.gz",
+                SEGRESNET_PRED_DIR / f"{case_id}.nii.gz",
+            ]
+        )
+    missing = [path for path in required if not path.exists()]
+    if missing:
+        formatted = "\n".join(f"  - {path}" for path in missing)
+        raise FileNotFoundError(
+            f"Missing report inputs for nnU-Net run {RUN_ID!r}:\n{formatted}\n"
+            "Pass the correct run with `--run-id`, or restore the ignored local artifacts."
+        )
+
 
 COLORS = {
     "navy": "#17324d",
@@ -327,6 +387,17 @@ def generate_radar() -> None:
 
 
 def measure_network() -> None:
+    """Measure nnU-Net 2.x using APIs validated against project version 2.5.x."""
+
+    try:
+        nnunet_version = version("nnunetv2")
+    except PackageNotFoundError as exc:
+        raise RuntimeError("nnunetv2 is required to measure the nnU-Net network") from exc
+    if nnunet_version.split(".", 1)[0] != "2":
+        raise RuntimeError(
+            f"Unsupported nnunetv2 {nnunet_version}; internal architecture APIs "
+            "were validated with nnunetv2 2.5.x."
+        )
     from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
     from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
 
@@ -439,7 +510,20 @@ def measure_segresnet_network() -> None:
         handle.write("\n")
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--run-id",
+        default=DEFAULT_RUN_ID,
+        help="Local nnU-Net run id used for metrics, predictions, and plans.",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
+    configure_nnunet_run(args.run_id)
+    require_generation_inputs()
     ASSETS.mkdir(parents=True, exist_ok=True)
     generate_training_curves()
     generate_segresnet_training_curve()

@@ -13,14 +13,25 @@
 #let paper-gold = rgb("fff8e8")
 #let paper-red = rgb("fff2ef")
 
-// English uses Libertinus Serif; the Noto CJK families keep Linux builds reproducible.
+// Preserve the project-preferred CJK route, then fall back to Linux Noto CJK fonts.
 #let cjk-fonts = (
+  "LXGW WenKai",
+  "Songti SC",
+  "Source Han Serif",
+  "SimSun",
+  "Microsoft YaHei",
   "Noto Serif CJK SC",
   "Noto Serif CJK JP",
 )
 #let body-fonts = ("Libertinus Serif", ..cjk-fonts)
-#let sans-fonts = ("Noto Sans CJK SC", "Noto Sans CJK JP", "DejaVu Sans")
-#let mono-fonts = ("DejaVu Sans Mono",)
+#let sans-fonts = (
+  "LXGW WenKai",
+  "Microsoft YaHei",
+  "Noto Sans CJK SC",
+  "Noto Sans CJK JP",
+  "DejaVu Sans",
+)
+#let mono-fonts = ("Consolas", "DejaVu Sans Mono")
 
 #let academic-report(
   title: "课程实验报告",
