@@ -42,6 +42,13 @@ def build_parser() -> argparse.ArgumentParser:
     predict_parser.add_argument("--configuration", default="2d")
     predict_parser.add_argument("--folds", default="0")
     predict_parser.add_argument("--checkpoint-name")
+    predict_parser.add_argument("--device", choices=("cuda", "cpu", "mps"))
+    predict_parser.add_argument("--disable-tta", action="store_true")
+    predict_parser.add_argument("--not-on-device", action="store_true")
+    predict_parser.add_argument("--npp", type=int)
+    predict_parser.add_argument("--nps", type=int)
+    predict_parser.add_argument("--num-parts", type=int, default=1)
+    predict_parser.add_argument("--part-id", type=int, default=0)
     predict_parser.add_argument("--dry-run", action="store_true")
 
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate predictions against labels.")
@@ -82,6 +89,13 @@ def main() -> None:
             configuration=args.configuration,
             folds=args.folds,
             checkpoint_name=args.checkpoint_name,
+            device=args.device,
+            disable_tta=args.disable_tta,
+            not_on_device=args.not_on_device,
+            num_processes_preprocessing=args.npp,
+            num_processes_segmentation_export=args.nps,
+            num_parts=args.num_parts,
+            part_id=args.part_id,
             dry_run=args.dry_run,
         )
     elif args.command == "evaluate":
