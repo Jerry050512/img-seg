@@ -137,6 +137,39 @@ def test_list_efficientnet_checkpoints_uses_pth_and_prefers_configured_best(
     ]
 
 
+def test_list_checkpoints_discovers_timestamped_run_dirs(tmp_path: Path) -> None:
+    results_dir = tmp_path / "checkpoints" / "nnunet_v2"
+    run_fold_dir = (
+        tmp_path
+        / "checkpoints"
+        / "nnunet_v2_runs"
+        / "nnunet_v2_2d_fold0_200epochs_20260710_114102"
+        / "Dataset777_Tiny"
+        / "nnUNetTrainer_200epochs__nnUNetPlans__2d"
+        / "fold_0"
+    )
+    run_fold_dir.mkdir(parents=True)
+    (run_fold_dir / "checkpoint_best.pth").write_bytes(b"best")
+    config = {
+        "model_key": "nnunet_v2",
+        "dataset": {"id": 777, "name": "Tiny"},
+        "paths": {
+            "nnunet_raw": str(tmp_path / "raw"),
+            "nnunet_preprocessed": str(tmp_path / "preprocessed"),
+            "nnunet_results": str(results_dir),
+        },
+        "training": {"trainer": "nnUNetTrainer_200epochs"},
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    checkpoints = list_checkpoints(config_path=config_path)
+
+    assert len(checkpoints) == 1
+    assert checkpoints[0].path == run_fold_dir / "checkpoint_best.pth"
+    assert "20260710_114102" in checkpoints[0].label
+
+
 def test_prepare_checkpoint_name_rejects_non_checkpoint_file(tmp_path: Path) -> None:
     bad_checkpoint = tmp_path / "checkpoint.txt"
     bad_checkpoint.write_text("not a checkpoint", encoding="utf-8")
@@ -152,6 +185,57 @@ def test_prepare_checkpoint_name_rejects_non_checkpoint_file(tmp_path: Path) -> 
         assert ".pth" in str(exc)
     else:
         raise AssertionError("Expected non-.pth checkpoint to be rejected")
+
+
+def test_prepare_checkpoint_name_avoids_external_name_collisions(tmp_path: Path) -> None:
+    results_dir = tmp_path / "results"
+    configured_fold_dir = (
+        results_dir
+        / "Dataset777_Tiny"
+        / "nnUNetTrainer_200epochs__nnUNetPlans__2d"
+        / "fold_0"
+    )
+    configured_fold_dir.mkdir(parents=True)
+    (configured_fold_dir / "checkpoint_best.pth").write_bytes(b"old")
+    external_model_dir = (
+        tmp_path
+        / "runs"
+        / "run_1"
+        / "Dataset777_Tiny"
+        / "nnUNetTrainer_200epochs__nnUNetPlans__2d"
+    )
+    external_fold_dir = external_model_dir / "fold_0"
+    external_fold_dir.mkdir(parents=True)
+    external_checkpoint = external_fold_dir / "checkpoint_best.pth"
+    external_checkpoint.write_bytes(b"new")
+    (external_model_dir / "dataset.json").write_text("{}", encoding="utf-8")
+    (external_model_dir / "plans.json").write_text("{}", encoding="utf-8")
+    config = {
+        "model_key": "nnunet_v2",
+        "dataset": {"id": 777, "name": "Tiny"},
+        "paths": {
+            "nnunet_raw": str(tmp_path / "raw"),
+            "nnunet_preprocessed": str(tmp_path / "preprocessed"),
+            "nnunet_results": str(results_dir),
+        },
+        "training": {"trainer": "nnUNetTrainer_200epochs"},
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    checkpoint_name = batch._prepare_checkpoint_name(
+        external_checkpoint,
+        config_path=config_path,
+        configuration="2d",
+        folds="0",
+    )
+
+    assert checkpoint_name != "checkpoint_best.pth"
+    assert checkpoint_name.startswith("checkpoint_best_")
+    assert (configured_fold_dir / checkpoint_name).read_bytes() == b"new"
+    assert (configured_fold_dir / "checkpoint_best.pth").read_bytes() == b"old"
+    assert (configured_fold_dir.parent / "dataset.json").exists()
+    assert (configured_fold_dir.parent / "plans.json").exists()
 
 
 def test_run_batch_inference_exports_nifti_and_png(monkeypatch, tmp_path: Path) -> None:

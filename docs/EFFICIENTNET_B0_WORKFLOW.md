@@ -73,6 +73,8 @@ checkpoints/efficientnet_b0/<run_name>/best.pth
 
 项目生成的 checkpoint 会保存模型与预处理配置；加载时会校验架构、encoder、通道数、`image_size` 和 `slice_axis`。若当前配置不兼容会直接报错，避免在错误预处理下静默生成结果。只有纯 state dict 等不含配置元数据的旧权重无法执行这项校验。
 
+由于完整 checkpoint 同时包含配置和运行元数据，加载时需要使用 PyTorch 的完整 pickle 反序列化。只应加载本项目训练产生或来自可信模型负责人的 `.pth` 文件，不要加载来源不明的 checkpoint。
+
 若自定义 `checkpoints.best`，建议让模板位于 `checkpoints.output_dir` 内。训练会把时间戳目录插入模板的父目录与文件名之间；WebUI 会递归查找该输出目录中的 `.pth`，并优先列出较新的时间戳运行。
 
 ## 评估

@@ -13,6 +13,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
+from hashlib import sha1
 from pathlib import Path
 from typing import Literal, TextIO
 
@@ -303,13 +304,24 @@ def list_checkpoints(
         str(deep_get(config, "dataset.name")),
     )
     trainer = str(deep_get(config, "training.trainer", "nnUNetTrainer"))
-    fold_dir = (
-        paths.results
-        / dataset_name
-        / f"{trainer}__nnUNetPlans__{configuration}"
-        / f"fold_{fold}"
-    )
-    checkpoints = sorted(fold_dir.glob("checkpoint*.pth"), key=lambda item: item.name)
+    trainer_dir = f"{trainer}__nnUNetPlans__{configuration}"
+    fold_name = f"fold_{fold}"
+    configured_fold_dir = paths.results / dataset_name / trainer_dir / fold_name
+    run_root = paths.results.parent / f"{paths.results.name}_runs"
+
+    checkpoint_dirs = [configured_fold_dir]
+    if run_root.exists():
+        checkpoint_dirs.extend(run_root.glob(f"*/{dataset_name}/{trainer_dir}/{fold_name}"))
+
+    checkpoints: list[Path] = []
+    seen_paths: set[Path] = set()
+    for fold_dir in checkpoint_dirs:
+        for checkpoint in fold_dir.glob("checkpoint*.pth"):
+            resolved = checkpoint.resolve()
+            if resolved in seen_paths:
+                continue
+            seen_paths.add(resolved)
+            checkpoints.append(checkpoint)
 
     def priority(path: Path) -> tuple[int, str]:
         if path.name == "checkpoint_final.pth":
@@ -318,13 +330,31 @@ def list_checkpoints(
             return (1, path.name)
         return (2, path.name)
 
+    def label(path: Path) -> str:
+        try:
+            relative_to_run_root = path.relative_to(run_root)
+        except ValueError:
+            return f"{path.name} - {path.parent.name}"
+        run_id = relative_to_run_root.parts[0] if relative_to_run_root.parts else run_root.name
+        return f"{path.name} - {run_id}/{path.parent.name}"
+
+    def sort_key(path: Path) -> tuple[float, int, str, str]:
+        try:
+            newest_in_fold = max(
+                item.stat().st_mtime for item in path.parent.glob("checkpoint*.pth")
+            )
+        except ValueError:
+            newest_in_fold = path.stat().st_mtime
+        rank, name = priority(path)
+        return (-newest_in_fold, rank, label(path), name)
+
     return [
         CheckpointInfo(
-            label=f"{checkpoint.name} - {checkpoint.parent.name}",
+            label=label(checkpoint),
             path=checkpoint,
             checkpoint_name=checkpoint.name,
         )
-        for checkpoint in sorted(checkpoints, key=priority)
+        for checkpoint in sorted(checkpoints, key=sort_key)
     ]
 
 
@@ -466,10 +496,27 @@ def _prepare_checkpoint_name(
         return checkpoint_path.name
 
     fold_dir.mkdir(parents=True, exist_ok=True)
-    target = fold_dir / checkpoint_path.name
-    if not target.exists():
+    target_name = (
+        f"{checkpoint_path.stem}_"
+        f"{sha1(str(checkpoint_path.resolve()).encode('utf-8')).hexdigest()[:10]}"
+        f"{checkpoint_path.suffix}"
+    )
+    target = fold_dir / target_name
+    if (
+        not target.exists()
+        or target.stat().st_size != checkpoint_path.stat().st_size
+        or target.stat().st_mtime_ns < checkpoint_path.stat().st_mtime_ns
+    ):
         shutil.copyfile(checkpoint_path, target)
-    return target.name
+
+    source_model_dir = checkpoint_path.parent.parent
+    target_model_dir = fold_dir.parent
+    for metadata_name in ("dataset.json", "plans.json"):
+        source_metadata = source_model_dir / metadata_name
+        target_metadata = target_model_dir / metadata_name
+        if source_metadata.exists() and not target_metadata.exists():
+            shutil.copyfile(source_metadata, target_metadata)
+    return target_name
 
 
 def _kill_process_tree(process: subprocess.Popen) -> None:

@@ -188,7 +188,9 @@ class EfficientNetB0Segmenter:
         checkpoint_path = Path(checkpoint_path)
         if not checkpoint_path.exists():
             raise FileNotFoundError(f"Checkpoint does not exist: {checkpoint_path}")
-        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
+        # Project checkpoints embed config and run metadata alongside tensor weights.
+        # Full pickle loading is therefore required; only load trusted project artifacts.
+        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
         _validate_checkpoint_config(checkpoint, self.config)
         self.model.load_state_dict(_state_dict_from_checkpoint(checkpoint))
         self.model.to(self.device)

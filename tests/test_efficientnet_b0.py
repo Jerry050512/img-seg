@@ -82,7 +82,16 @@ def test_efficientnet_segmenter_predicts_nifti_and_image(tmp_path: Path) -> None
     config = tiny_config()
     segmenter = EfficientNetB0Segmenter(config, device="cpu")
     checkpoint_path = tmp_path / "best.pth"
-    torch.save({"model_state_dict": segmenter.model.state_dict()}, checkpoint_path)
+    torch.save(
+        {
+            "model_state_dict": segmenter.model.state_dict(),
+            "config": config,
+            "epoch": 3,
+            "best_val_dice": 0.75,
+            "run_name": "20260710T083015123456Z",
+        },
+        checkpoint_path,
+    )
 
     loaded = EfficientNetB0Segmenter(config, device="cpu")
     loaded.load(checkpoint_path)
@@ -348,7 +357,7 @@ def test_training_writes_pth_checkpoint_and_jsonl_log(
     }
     assert hyperparameters["runtime"] == {"device": "cpu", "num_workers": 0}
     assert records[1]["dice"] == pytest.approx(0.75)
-    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     assert checkpoint["run_name"] == run_name
 
 
